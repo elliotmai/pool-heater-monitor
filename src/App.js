@@ -4,19 +4,20 @@ import {
   AppBar, 
   Toolbar, 
   Typography, 
-  IconButton, 
+  // IconButton, 
   BottomNavigation,
   BottomNavigationAction,
   CircularProgress,
   Alert
 } from '@mui/material';
 import { 
-  Refresh, 
+  // Refresh, 
   Home, 
   ShowChart, 
   ListAlt,
-  Water 
+  Water,
 } from '@mui/icons-material';
+import LocalFireDepartmentIcon from '@mui/icons-material/LocalFireDepartment';
 import Overview from './components/Overview';
 import Trends from './components/Trends';
 import Logs from './components/Logs';
@@ -99,6 +100,7 @@ function App() {
       >
         <Toolbar sx={{ minHeight: '44px !important', py: 0 }}>
           <Water sx={{ mr: 1, fontSize: 20 }} />
+          <LocalFireDepartmentIcon  sx={{ mr: 1, fontSize: 20 }} />
           <Typography 
             variant="h6" 
             component="div" 
@@ -109,14 +111,14 @@ function App() {
               letterSpacing: '-0.4px'
             }}
           >
-            Pool Monitor
+            Pool Heater Monitor
           </Typography>
-          <IconButton 
+          {/* <IconButton 
             onClick={refreshData}
             sx={{ color: '#007aff' }}
           >
             <Refresh />
-          </IconButton>
+          </IconButton> */}
         </Toolbar>
       </AppBar>
 

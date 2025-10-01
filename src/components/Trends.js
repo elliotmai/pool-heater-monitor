@@ -200,8 +200,8 @@ const Trends = ({ latest, historical, weather }) => {
                     {weather && (
                       <Line
                         type="monotone"
-                        dataKey="outdoor_temp"
-                        stroke="#34c759"
+                        dataKey={"outdoor_temp"}
+                        stroke="black"
                         strokeWidth={2}
                         strokeDasharray="5 5"
                         name="Outdoor Temp"
