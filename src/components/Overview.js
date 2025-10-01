@@ -117,7 +117,9 @@ const Overview = ({ latest, weather }) => {
 //   const uvBadge = weather ? getUVBadge(weather.current.uv) : null;
 
   return (
+    
     <Box sx={{ p: 2, maxWidth: '800px', mx: 'auto' }}>
+        <Typography>Testing</Typography>
       {/* Temperature Sensors */}
       <Card sx={{ mb: 1.5, boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)' }}>
         <CardContent>
