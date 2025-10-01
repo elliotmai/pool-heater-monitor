@@ -3,7 +3,7 @@
   "name": "Pool Heater Monitor",
   "icons": [
     {
-      "src": "icons/amdroid-chrome-192.png",
+      "src": "icons/android-chrome-192.png",
       "type": "image/png",
       "sizes": "192x192",
       "purpose": "any maskable"
