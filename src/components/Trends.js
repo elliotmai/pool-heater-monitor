@@ -176,12 +176,13 @@ const Trends = ({ latest, historical, weather }) => {
                         backgroundColor: 'rgba(0, 0, 0, 0.8)',
                         border: 'none',
                         borderRadius: '8px',
-                        fontSize: '11px'
+                        fontSize: '11px',
+                        color: 'white'
                       }}
                       formatter={(value) => [`${value?.toFixed(1)}°F`]}
                     />
                     <Legend 
-                      wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }}
+                      wrapperStyle={{ fontSize: '11px', paddingTop: '10px', color: 'black' }}
                     />
                     
                     {Object.entries(SENSOR_CONFIG).map(([sensorName, config]) => (
@@ -201,7 +202,7 @@ const Trends = ({ latest, historical, weather }) => {
                       <Line
                         type="monotone"
                         dataKey={"outdoor_temp"}
-                        stroke="black"
+                        stroke="grey"
                         strokeWidth={2}
                         strokeDasharray="5 5"
                         name="Outdoor Temp"
@@ -288,7 +289,8 @@ const Trends = ({ latest, historical, weather }) => {
                           backgroundColor: 'rgba(0, 0, 0, 0.8)',
                           border: 'none',
                           borderRadius: '8px',
-                          fontSize: '11px'
+                          fontSize: '11px',
+                          color: 'white'
                         }}
                         formatter={(value) => [`${value?.toFixed(1)}°F`]}
                       />
@@ -374,7 +376,8 @@ const Trends = ({ latest, historical, weather }) => {
                           backgroundColor: 'rgba(0, 0, 0, 0.8)',
                           border: 'none',
                           borderRadius: '8px',
-                          fontSize: '11px'
+                          fontSize: '11px',
+                          color: 'white'
                         }}
                         formatter={(value) => [`${value?.toFixed(1)}°F`]}
                       />
@@ -455,7 +458,8 @@ const Trends = ({ latest, historical, weather }) => {
                           backgroundColor: 'rgba(0, 0, 0, 0.8)',
                           border: 'none',
                           borderRadius: '8px',
-                          fontSize: '11px'
+                          fontSize: '11px',
+                          color: 'white'
                         }}
                         formatter={(value) => [`${value?.toFixed(1)}°F`]}
                       />
@@ -472,7 +476,7 @@ const Trends = ({ latest, historical, weather }) => {
                       <Line
                         type="monotone"
                         dataKey="outdoor_temp"
-                        stroke="#34c759"
+                        stroke="grey"
                         strokeWidth={2}
                         strokeDasharray="5 5"
                         name="Outdoor Temp"
@@ -539,7 +543,8 @@ const Trends = ({ latest, historical, weather }) => {
                           backgroundColor: 'rgba(0, 0, 0, 0.8)',
                           border: 'none',
                           borderRadius: '8px',
-                          fontSize: '11px'
+                          fontSize: '11px',
+                          color: 'white'
                         }}
                         formatter={(value, name) => [`${(value * 100).toFixed(1)}%`, name]}
                       />
