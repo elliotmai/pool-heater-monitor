@@ -60,9 +60,9 @@ function App() {
   const renderTabContent = () => {
     switch (currentTab) {
       case 0:
-        return <Overview latest={data.latest} weather={data.weather} />;
+        return <Overview latest={data.latest} weather={data.weather} weatherHistory={data.weatherHistory} />;
       case 1:
-        return <Trends latest={data.latest} historical={data.historical} weather={data.weather} />;
+        return <Trends latest={data.latest} historical={data.historical} weatherHistory={data.weatherHistory} />;
       case 2:
         return <Logs logs={data.logs} />;
       default:

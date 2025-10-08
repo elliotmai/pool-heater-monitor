@@ -3,7 +3,7 @@ import { Box, Card, CardContent, Typography, ToggleButtonGroup, ToggleButton } f
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area, ComposedChart, Bar } from 'recharts';
 import { SENSOR_CONFIG } from '../config/config';
 
-const Trends = ({ latest, historical, weather }) => {
+const Trends = ({ latest, historical, weatherHistory }) => {
   const [chartView, setChartView] = useState('all');
   const [timeFilter, setTimeFilter] = useState('24h');
 
@@ -53,16 +53,20 @@ const Trends = ({ latest, historical, weather }) => {
     });
   }, [historical, timeFilter]);
 
-  // Calculate temperature differentials
+  // Calculate temperature differentials - outdoor_temp already included from historical data
   const dataWithDifferentials = filteredHistorical?.map(reading => ({
     ...reading,
     heater_differential: reading.Red && reading.Blue ? reading.Red - reading.Blue : null,
     avg_temp: reading.Blue && reading.Red && reading.Yellow && reading.Green 
       ? (reading.Blue + reading.Red + reading.Yellow + reading.Green) / 4 
-      : null,
-    outdoor_temp: weather?.current.temp_f || null
+      : null
   })) || [];
 
+  // Check if we have outdoor temperature data in the historical readings
+  const hasOutdoorData = dataWithDifferentials.some(reading => 
+    reading.outdoor_temp !== null && reading.outdoor_temp !== undefined
+  );
+  
   return (
     <Box sx={{ p: 2 }}>
       {/* Controls */}
@@ -144,7 +148,7 @@ const Trends = ({ latest, historical, weather }) => {
                 mb: 1
               }}
             >
-              All Temperature Sensors + Outdoor
+              All Temperature Sensors {hasOutdoorData && '+ Outdoor'}
             </Typography>
             
             <Box sx={{ mt: 2, height: 350 }}>
@@ -198,10 +202,10 @@ const Trends = ({ latest, historical, weather }) => {
                       />
                     ))}
                     
-                    {weather && (
+                    {hasOutdoorData && (
                       <Line
                         type="monotone"
-                        dataKey={"outdoor_temp"}
+                        dataKey="outdoor_temp"
                         stroke="grey"
                         strokeWidth={2}
                         strokeDasharray="5 5"
@@ -430,7 +434,7 @@ const Trends = ({ latest, historical, weather }) => {
               </Typography>
               
               <Box sx={{ mt: 2, height: 300 }}>
-                {dataWithDifferentials && dataWithDifferentials.length > 0 && weather ? (
+                {dataWithDifferentials && dataWithDifferentials.length > 0 && hasOutdoorData ? (
                   <ResponsiveContainer width="100%" height="100%">
                     <LineChart 
                       data={dataWithDifferentials}
@@ -582,22 +586,22 @@ const Trends = ({ latest, historical, weather }) => {
       )}
 
       <Typography 
-              variant="caption" 
-              sx={{ 
-                textAlign: 'center',
-                fontSize: '11px',
-                color: '#8e8e93',
-                display: 'block',
-                py: 1.5
-              }}
-            >
-              Last updated: {latest?.timestamp ? new Date(latest.timestamp).toLocaleString('en-US', { 
-                month: 'short', 
-                day: 'numeric', 
-                hour: '2-digit', 
-                minute: '2-digit' 
-              }) : 'Never'}
-            </Typography>
+        variant="caption" 
+        sx={{ 
+          textAlign: 'center',
+          fontSize: '11px',
+          color: '#8e8e93',
+          display: 'block',
+          py: 1.5
+        }}
+      >
+        Last updated: {latest?.timestamp ? new Date(latest.timestamp).toLocaleString('en-US', { 
+          month: 'short', 
+          day: 'numeric', 
+          hour: '2-digit', 
+          minute: '2-digit' 
+        }) : 'Never'}
+      </Typography>
 
     </Box>
     

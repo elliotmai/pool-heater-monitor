@@ -2,8 +2,8 @@
 export const CONFIG = {
   FIREBASE_URL: 'https://water-heater-sensors-default-rtdb.firebaseio.com',
   WEATHER_API_KEY: 'f8c6c1c8e0d64f5b8a5165045242909',
-  LOCATION: 'Plano,Texas',
-  REFRESH_INTERVAL: 60000, // 1 minute
+  LOCATION: 'Rhome ,Texas',
+  REFRESH_INTERVAL: 300000, // 5 minutes
 };
 
 // Sensor display configuration
