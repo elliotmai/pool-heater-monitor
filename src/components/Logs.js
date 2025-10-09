@@ -82,7 +82,7 @@ const LogItem = ({ log }) => {
 const Logs = ({ logs }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [levelFilter, setLevelFilter] = useState('all');
-  const [timeFilter, setTimeFilter] = useState('all');
+  const [timeFilter, setTimeFilter] = useState('1h');
 
   const handleLevelFilterChange = (event, newFilter) => {
     if (newFilter !== null) {
@@ -135,7 +135,7 @@ const Logs = ({ logs }) => {
           hoursAgo = 24 * 7;
           break;
         default:
-          hoursAgo = null;
+          hoursAgo = 1;
       }
 
       if (hoursAgo) {
@@ -256,7 +256,7 @@ const Logs = ({ logs }) => {
           <ToggleButton value="6h">Last 6 Hours</ToggleButton>
           <ToggleButton value="24h">Last 24 Hours</ToggleButton>
           <ToggleButton value="7d">Last 7 Days</ToggleButton>
-          <ToggleButton value="all">All Time</ToggleButton>
+          {/* <ToggleButton value="all">All Time</ToggleButton> */}
         </ToggleButtonGroup>
       </Box>
 

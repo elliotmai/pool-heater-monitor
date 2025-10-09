@@ -42,8 +42,8 @@ export const fetchLatestData = async () => {
 export const fetchHistoricalData = async () => {
   try {
     const [sensorsResponse, weatherResponse] = await Promise.all([
-      fetch(`${CONFIG.FIREBASE_URL}/readings.json?orderBy="unix_timestamp"&limitToLast=48`),
-      fetch(`${CONFIG.FIREBASE_URL}/weather_history.json?orderBy="unix_timestamp"&limitToLast=48`)
+      fetch(`${CONFIG.FIREBASE_URL}/readings.json?orderBy="unix_timestamp"`),
+      fetch(`${CONFIG.FIREBASE_URL}/weather_history.json?orderBy="unix_timestamp"`)
     ]);
     
     if (!sensorsResponse.ok) throw new Error('Failed to fetch historical data');
@@ -261,14 +261,25 @@ export const fetchWeatherData = async () => {
 export const fetchLogs = async () => {
   try {
     const response = await fetch(
-      `${CONFIG.FIREBASE_URL}/logs.json?orderBy="$key"&limitToLast=50`
+      `${CONFIG.FIREBASE_URL}/logs.json`
     );
     if (!response.ok) return [];
     const data = await response.json();
     
     if (data) {
-      // Convert to array and reverse (newest first)
-      return Object.values(data).reverse();
+      // Filter to last 7 days based on timestamp field
+      const sevenDaysAgo = new Date();
+      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+      const cutoffTime = sevenDaysAgo.getTime();
+      
+      // Convert to array, filter by last 7 days, and reverse (newest first)
+      return Object.values(data)
+        .filter(log => {
+          if (!log.timestamp) return false;
+          const logTime = new Date(log.timestamp).getTime();
+          return logTime >= cutoffTime;
+        })
+        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     }
     return [];
   } catch (error) {
@@ -283,7 +294,7 @@ export const fetchLogs = async () => {
 export const fetchWeatherHistory = async () => {
   try {
     const response = await fetch(
-      `${CONFIG.FIREBASE_URL}/weather_history.json?orderBy="unix_timestamp"&limitToLast=100`
+      `${CONFIG.FIREBASE_URL}/weather_history.json?orderBy="unix_timestamp"`
     );
     if (!response.ok) return [];
     const data = await response.json();

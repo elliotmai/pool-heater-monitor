@@ -1,11 +1,13 @@
 import React, { useState, useMemo } from 'react';
-import { Box, Card, CardContent, Typography, ToggleButtonGroup, ToggleButton } from '@mui/material';
+import { Box, Card, CardContent, Typography, ToggleButtonGroup, ToggleButton, IconButton } from '@mui/material';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area, ComposedChart, Bar } from 'recharts';
+import { ArrowBack, ArrowForward } from '@mui/icons-material';
 import { SENSOR_CONFIG } from '../config/config';
 
 const Trends = ({ latest, historical, weatherHistory }) => {
   const [chartView, setChartView] = useState('all');
   const [timeFilter, setTimeFilter] = useState('24h');
+  const [timeOffset, setTimeOffset] = useState(0); // 0 = current, 1 = one period back, etc.
 
   const handleViewChange = (event, newView) => {
     if (newView !== null) {
@@ -16,6 +18,7 @@ const Trends = ({ latest, historical, weatherHistory }) => {
   const handleTimeFilterChange = (event, newFilter) => {
     if (newFilter !== null) {
       setTimeFilter(newFilter);
+      setTimeOffset(0); // Reset offset when changing time filter
     }
   };
 
@@ -39,19 +42,42 @@ const Trends = ({ latest, historical, weatherHistory }) => {
       case '24h':
         hoursToShow = 24;
         break;
-      case 'all':
-        return historical;
       default:
         hoursToShow = 24;
     }
     
-    const cutoffTime = now.getTime() - (hoursToShow * 60 * 60 * 1000);
+    // Calculate the time window based on offset
+    const endTime = now.getTime() - (timeOffset * hoursToShow * 60 * 60 * 1000);
+    const startTime = endTime - (hoursToShow * 60 * 60 * 1000);
     
     return historical.filter(reading => {
       if (!reading.unix_timestamp) return true;
-      return reading.unix_timestamp * 1000 >= cutoffTime;
+      const readingTime = reading.unix_timestamp * 1000;
+      return readingTime >= startTime && readingTime < endTime;
     });
-  }, [historical, timeFilter]);
+  }, [historical, timeFilter, timeOffset]);
+
+  // Check if we can go back or forward
+  const canGoBack = useMemo(() => {
+    if (!historical || historical.length === 0) return false;
+    const oldestTimestamp = Math.min(...historical.map(r => r.unix_timestamp || Infinity));
+    if (oldestTimestamp === Infinity) return false;
+    
+    const now = new Date();
+    let hoursToShow;
+    switch (timeFilter) {
+      case '1h': hoursToShow = 1; break;
+      case '6h': hoursToShow = 6; break;
+      case '12h': hoursToShow = 12; break;
+      case '24h': hoursToShow = 24; break;
+      default: hoursToShow = 24;
+    }
+    
+    const startTime = now.getTime() - ((timeOffset + 1) * hoursToShow * 60 * 60 * 1000);
+    return (oldestTimestamp * 1000) < startTime;
+  }, [historical, timeFilter, timeOffset]);
+
+  const canGoForward = timeOffset > 0;
 
   // Calculate temperature differentials - outdoor_temp already included from historical data
   const dataWithDifferentials = filteredHistorical?.map(reading => ({
@@ -66,7 +92,11 @@ const Trends = ({ latest, historical, weatherHistory }) => {
   const hasOutdoorData = dataWithDifferentials.some(reading => 
     reading.outdoor_temp !== null && reading.outdoor_temp !== undefined
   );
-  
+
+  // Debug log
+  console.log('Has outdoor data:', hasOutdoorData);
+  console.log('Sample reading:', dataWithDifferentials[0]);
+
   return (
     <Box sx={{ p: 2 }}>
       {/* Controls */}
@@ -128,8 +158,67 @@ const Trends = ({ latest, historical, weatherHistory }) => {
           <ToggleButton value="6h">6 Hours</ToggleButton>
           <ToggleButton value="12h">12 Hours</ToggleButton>
           <ToggleButton value="24h">24 Hours</ToggleButton>
-          <ToggleButton value="all">All Data</ToggleButton>
         </ToggleButtonGroup>
+
+        {/* Time Navigation */}
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+          <IconButton 
+            onClick={() => setTimeOffset(prev => prev + 1)}
+            disabled={!canGoBack}
+            size="small"
+            sx={{ 
+              color: '#007aff',
+              '&.Mui-disabled': {
+                color: '#c7c7cc'
+              }
+            }}
+          >
+            <ArrowBack fontSize="small" />
+          </IconButton>
+          <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
+            <Typography 
+              variant="caption" 
+              sx={{ 
+                fontSize: '11px',
+                color: '#8e8e93',
+                minWidth: '120px',
+                textAlign: 'center'
+              }}
+            >
+              {timeOffset === 0 ? 'Current' : `${timeOffset} period${timeOffset > 1 ? 's' : ''} ago`}
+            </Typography>
+            {timeOffset > 0 && (
+              <Typography
+                variant="caption"
+                onClick={() => setTimeOffset(0)}
+                sx={{
+                  fontSize: '10px',
+                  color: '#007aff',
+                  cursor: 'pointer',
+                  textDecoration: 'underline',
+                  '&:hover': {
+                    color: '#0051d5'
+                  }
+                }}
+              >
+                Now
+              </Typography>
+            )}
+          </Box>
+          <IconButton 
+            onClick={() => setTimeOffset(prev => prev - 1)}
+            disabled={!canGoForward}
+            size="small"
+            sx={{ 
+              color: '#007aff',
+              '&.Mui-disabled': {
+                color: '#c7c7cc'
+              }
+            }}
+          >
+            <ArrowForward fontSize="small" />
+          </IconButton>
+        </Box>
       </Box>
 
       {/* All Sensors Chart */}
