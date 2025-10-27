@@ -1,5 +1,8 @@
 import { CONFIG } from '../config/config';
 import { transformSensorData } from './sensorMapping';
+import { getLocation } from '../config/settingsUtils';
+
+const LOCATION = getLocation();
 
 /**
  * Convert Celsius to Fahrenheit
@@ -111,7 +114,7 @@ export const fetchHistoricalData = async () => {
  */
 const getCoordinates = () => {
   // Rhome, Texas coordinates
-  return { lat: 33.0258, lon: -97.5025 };
+  return { lat: LOCATION.lat, lon: LOCATION.lon };
 };
 
 /**
@@ -212,8 +215,8 @@ export const fetchWeatherData = async () => {
     // Transform to match our expected format
     const weatherData = {
       location: {
-        name: 'Rhome',
-        region: 'Texas'
+        name: LOCATION.name,
+        region: LOCATION.region
       },
       current: {
         temp_f: parseFloat(tempF.toFixed(1)),
@@ -318,13 +321,33 @@ export const fetchWeatherHistory = async () => {
  * Fetch all data in parallel
  */
 export const fetchAllData = async () => {
-  const [latest, historical, weather, weatherHistory, logs] = await Promise.all([
+  const [latest, historical, weatherHistory, logs] = await Promise.all([
     fetchLatestData(),
     fetchHistoricalData(),
-    fetchWeatherData(),
     fetchWeatherHistory(),
     fetchLogs()
   ]);
+
+  // Get the most recent weather from weatherHistory instead of fetching live
+  const weather = weatherHistory && weatherHistory.length > 0 
+    ? {
+        location: {
+          name: LOCATION.name,
+          region: LOCATION.region
+        },
+        current: {
+          temp_f: weatherHistory[weatherHistory.length - 1].temp_f,
+          temp_c: weatherHistory[weatherHistory.length - 1].temp_c,
+          feelslike_f: weatherHistory[weatherHistory.length - 1].temp_f, // Approximation
+          feelslike_c: weatherHistory[weatherHistory.length - 1].temp_c, // Approximation
+          humidity: weatherHistory[weatherHistory.length - 1].humidity,
+          condition: {
+            text: weatherHistory[weatherHistory.length - 1].description,
+            icon: weatherHistory[weatherHistory.length - 1].icon || ''
+          }
+        }
+      }
+    : null;
 
   return { latest, historical, weather, weatherHistory, logs };
 };

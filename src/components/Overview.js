@@ -1,6 +1,10 @@
 import React from 'react';
 import { Box, Card, CardContent, Grid, Typography, Chip } from '@mui/material';
-import { SENSOR_CONFIG } from '../config/config';
+import { getLocation, getSensorConfig } from '../config/settingsUtils';
+
+const SENSOR_CONFIG = getSensorConfig();
+const LOCATION_CONFIG = getLocation();
+
 
 // const getUVBadge = (uv) => {
 //   if (uv < 3) return { label: 'Low', color: 'success' };
@@ -165,7 +169,7 @@ const Overview = ({ latest, weather }) => {
                 textAlign: 'center'
               }}
             >
-              Weather - {weather.location.name}
+              Weather - {LOCATION_CONFIG.name}
             </Typography>
             <Grid container spacing={2} justifyContent="center">
               <Grid item xs={12} sm={6}>

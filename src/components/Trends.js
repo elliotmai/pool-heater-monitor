@@ -2,13 +2,16 @@ import React, { useState, useMemo } from 'react';
 import { Box, Card, CardContent, Typography, ToggleButtonGroup, ToggleButton, IconButton } from '@mui/material';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area, ComposedChart, Bar } from 'recharts';
 import { ArrowBack, ArrowForward } from '@mui/icons-material';
-import { SENSOR_CONFIG } from '../config/config';
+import { getSensorConfig } from '../config/settingsUtils';
 
 const Trends = ({ latest, historical, weatherHistory }) => {
   const [chartView, setChartView] = useState('all');
   const [timeFilter, setTimeFilter] = useState('24h');
   const [timeOffset, setTimeOffset] = useState(0); // 0 = current, 1 = one period back, etc.
 
+  // Get sensor config from settings
+  const SENSOR_CONFIG = getSensorConfig();
+  
   const handleViewChange = (event, newView) => {
     if (newView !== null) {
       setChartView(newView);

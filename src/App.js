@@ -8,7 +8,7 @@ import {
   BottomNavigation,
   BottomNavigationAction,
   CircularProgress,
-  Alert
+  Alert,
 } from '@mui/material';
 import { 
   // Refresh, 
@@ -16,11 +16,13 @@ import {
   ShowChart, 
   ListAlt,
   Water,
+  Settings as SettingsIcon,
 } from '@mui/icons-material';
 import LocalFireDepartmentIcon from '@mui/icons-material/LocalFireDepartment';
 import Overview from './components/Overview';
 import Trends from './components/Trends';
 import Logs from './components/Logs';
+import Settings from './components/Settings';
 import { fetchAllData } from './services/api';
 import { CONFIG } from './config/config';
 import './App.css';
@@ -65,6 +67,8 @@ function App() {
         return <Trends latest={data.latest} historical={data.historical} weatherHistory={data.weatherHistory} />;
       case 2:
         return <Logs logs={data.logs} />;
+        case 3:
+        return <Settings />;
       default:
         return null;
     }
@@ -174,6 +178,10 @@ function App() {
         <BottomNavigationAction 
           label="Logs" 
           icon={<ListAlt />} 
+        />
+        <BottomNavigationAction 
+          label="Settings" 
+          icon={<SettingsIcon />} 
         />
       </BottomNavigation>
     </Box>
