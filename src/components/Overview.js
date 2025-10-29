@@ -1,17 +1,6 @@
 import React from 'react';
 import { Box, Card, CardContent, Grid, Typography, Chip } from '@mui/material';
-import { getLocation, getSensorConfig } from '../config/settingsUtils';
-
-const SENSOR_CONFIG = getSensorConfig();
-const LOCATION_CONFIG = getLocation();
-
-
-// const getUVBadge = (uv) => {
-//   if (uv < 3) return { label: 'Low', color: 'success' };
-//   if (uv < 6) return { label: 'Moderate', color: 'warning' };
-//   if (uv < 8) return { label: 'High', color: 'error' };
-//   return { label: 'Very High', color: 'error' };
-// };
+import { getSensorConfig } from '../config/settingsUtils';
 
 const SensorCard = ({ name, value, config }) => (
   <Card 
@@ -118,8 +107,11 @@ const WeatherCard = ({ label, value, subtitle, badge, icon }) => (
 );
 
 const Overview = ({ latest, weather }) => {
-//   const uvBadge = weather ? getUVBadge(weather.current.uv) : null;
-
+  const SENSOR_CONFIG = getSensorConfig();
+  
+  // Use weather from latest data
+  const weatherData = latest?.weather;
+  
   return (
     <Box sx={{ p: 2, maxWidth: '800px', mx: 'auto' }}>
       {/* Temperature Sensors */}
@@ -154,7 +146,7 @@ const Overview = ({ latest, weather }) => {
       </Card>
 
       {/* Weather Information */}
-      {weather && (
+      {weatherData && (
         <Card sx={{ mb: 1.5, boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)' }}>
           <CardContent>
             <Typography 
@@ -169,21 +161,21 @@ const Overview = ({ latest, weather }) => {
                 textAlign: 'center'
               }}
             >
-              Weather - {LOCATION_CONFIG.name}
+              Weather - {weatherData.location?.name || 'Unknown'}, {weatherData.location?.region || ''}
             </Typography>
             <Grid container spacing={2} justifyContent="center">
               <Grid item xs={12} sm={6}>
                 <WeatherCard 
                   label="Temperature"
-                  value={`${weather.current.temp_f.toFixed(1)}°F`}
-                  subtitle={`Feels like ${weather.current.feelslike_f.toFixed(1)}°F`}
+                  value={`${weatherData.temp_f?.toFixed(1)}°F`}
+                  subtitle={`Humidity: ${weatherData.humidity}%`}
                 />
               </Grid>
               <Grid item xs={12} sm={6}>
                 <WeatherCard 
-                  label="Humidity"
-                  value={`${weather.current.humidity}%`}
-                  subtitle={weather.current.condition.text}
+                  label="Conditions"
+                  value={weatherData.icon ? <img src={weatherData.icon} alt="weather" style={{ width: '40px', height: '40px' }} /> : 'N/A'}
+                  subtitle={weatherData.description || ''}
                 />
               </Grid>
             </Grid>
@@ -205,6 +197,7 @@ const Overview = ({ latest, weather }) => {
         Last updated: {latest?.timestamp ? new Date(latest.timestamp).toLocaleString('en-US', { 
           month: 'short', 
           day: 'numeric', 
+          year: 'numeric',
           hour: '2-digit', 
           minute: '2-digit' 
         }) : 'Never'}

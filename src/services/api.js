@@ -1,8 +1,5 @@
 import { CONFIG } from '../config/config';
 import { transformSensorData } from './sensorMapping';
-import { getLocation } from '../config/settingsUtils';
-
-const LOCATION = getLocation();
 
 /**
  * Convert Celsius to Fahrenheit
@@ -17,10 +14,27 @@ const celsiusToFahrenheit = (celsius) => {
  */
 export const fetchLatestData = async () => {
   try {
-    const response = await fetch(`${CONFIG.FIREBASE_URL}/latest.json`);
-    if (!response.ok) throw new Error('Failed to fetch latest data');
-    const data = await response.json();
-    const transformed = transformSensorData(data);
+    const [sensorsResponse, weatherResponse] = await Promise.all([
+      fetch(`${CONFIG.FIREBASE_URL}/latest.json`),
+      fetch(`${CONFIG.FIREBASE_URL}/weather_history.json`)
+    ]);
+    
+    if (!sensorsResponse.ok) throw new Error('Failed to fetch latest data');
+    
+    const sensorsData = await sensorsResponse.json();
+    const weatherData = weatherResponse.ok ? await weatherResponse.json() : null;
+    
+    const transformed = transformSensorData(sensorsData);
+    
+    // Get the latest weather reading
+    let latestWeather = null;
+    if (weatherData) {
+      const weatherArray = Object.values(weatherData)
+        .sort((a, b) => b.unix_timestamp - a.unix_timestamp);
+      if (weatherArray.length > 0) {
+        latestWeather = weatherArray[0];
+      }
+    }
     
     // Convert all temperatures to Fahrenheit
     if (transformed) {
@@ -29,7 +43,8 @@ export const fetchLatestData = async () => {
         Blue: celsiusToFahrenheit(transformed.Blue),
         Red: celsiusToFahrenheit(transformed.Red),
         Yellow: celsiusToFahrenheit(transformed.Yellow),
-        Green: celsiusToFahrenheit(transformed.Green)
+        Green: celsiusToFahrenheit(transformed.Green),
+        weather: latestWeather
       };
     }
     return null;
@@ -45,8 +60,8 @@ export const fetchLatestData = async () => {
 export const fetchHistoricalData = async () => {
   try {
     const [sensorsResponse, weatherResponse] = await Promise.all([
-      fetch(`${CONFIG.FIREBASE_URL}/readings.json?orderBy="unix_timestamp"`),
-      fetch(`${CONFIG.FIREBASE_URL}/weather_history.json?orderBy="unix_timestamp"`)
+      fetch(`${CONFIG.FIREBASE_URL}/readings.json`),
+      fetch(`${CONFIG.FIREBASE_URL}/weather_history.json`)
     ]);
     
     if (!sensorsResponse.ok) throw new Error('Failed to fetch historical data');
@@ -63,9 +78,10 @@ export const fetchHistoricalData = async () => {
     }
     
     if (sensorsData) {
-      // Convert to array and sort by unix_timestamp
+      // Convert to array and sort by unix_timestamp, then take last 100
       const readings = Object.values(sensorsData)
         .sort((a, b) => (a.unix_timestamp || 0) - (b.unix_timestamp || 0))
+        .slice(-100) // Take last 100 readings
         .map(reading => {
           const date = new Date(reading.timestamp);
           const time = date.toLocaleTimeString('en-US', { 
@@ -110,155 +126,6 @@ export const fetchHistoricalData = async () => {
 };
 
 /**
- * Get coordinates for location (Rhome, Texas)
- */
-const getCoordinates = () => {
-  // Rhome, Texas coordinates
-  return { lat: LOCATION.lat, lon: LOCATION.lon };
-};
-
-/**
- * Write weather data to Firebase under /weather_history
- */
-const writeWeatherToFirebase = async (weatherData) => {
-  try {
-    const timestamp = Date.now();
-    const isoTimestamp = new Date().toISOString();
-    
-    const weatherRecord = {
-      timestamp: isoTimestamp,
-      unix_timestamp: Math.floor(timestamp / 1000),
-      temp_f: weatherData.current.temp_f,
-      temp_c: weatherData.current.temp_c,
-      humidity: weatherData.current.humidity,
-      description: weatherData.current.condition.text,
-      icon: weatherData.current.condition.icon
-    };
-    
-    // Write to /weather_history/{unix_timestamp}
-    const response = await fetch(
-      `${CONFIG.FIREBASE_URL}/weather_history/${weatherRecord.unix_timestamp}.json`,
-      {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(weatherRecord)
-      }
-    );
-    
-    if (response.ok) {
-      console.log('Weather data written to Firebase');
-    }
-  } catch (error) {
-    console.error('Error writing weather to Firebase:', error);
-  }
-};
-
-/**
- * Fetch current weather data from weather.gov and write to Firebase
- */
-export const fetchWeatherData = async () => {
-  try {
-    const { lat, lon } = getCoordinates();
-    
-    // First, get the grid point data
-    const pointsResponse = await fetch(
-      `https://api.weather.gov/points/${lat},${lon}`
-    );
-    
-    if (!pointsResponse.ok) {
-      console.error('Weather.gov points API failed:', pointsResponse.status);
-      return null;
-    }
-    
-    const pointsData = await pointsResponse.json();
-    
-    // Get observation stations
-    const observationStationsUrl = pointsData.properties.observationStations;
-    
-    const stationsResponse = await fetch(observationStationsUrl);
-    
-    if (!stationsResponse.ok) {
-      console.error('Weather.gov stations API failed:', stationsResponse.status);
-      return null;
-    }
-    
-    const stationsData = await stationsResponse.json();
-    const firstStationUrl = stationsData.features[0]?.id;
-    
-    if (!firstStationUrl) {
-      console.error('No weather station found');
-      return null;
-    }
-    
-    // Get latest observation
-    const observationResponse = await fetch(
-      `${firstStationUrl}/observations/latest`
-    );
-    
-    if (!observationResponse.ok) {
-      console.error('Weather.gov observation API failed:', observationResponse.status);
-      return null;
-    }
-    
-    const observationData = await observationResponse.json();
-    const obs = observationData.properties;
-    
-    // Convert temperatures to Fahrenheit
-    const tempC = obs.temperature?.value || 0;
-    const tempF = tempC ? (tempC * 9/5) + 32 : 0;
-    
-    const feelsLikeC = obs.heatIndex?.value || obs.windChill?.value || tempC;
-    const feelsLikeF = feelsLikeC ? (feelsLikeC * 9/5) + 32 : tempF;
-    
-    // Transform to match our expected format
-    const weatherData = {
-      location: {
-        name: LOCATION.name,
-        region: LOCATION.region
-      },
-      current: {
-        temp_f: parseFloat(tempF.toFixed(1)),
-        temp_c: parseFloat(tempC.toFixed(1)),
-        feelslike_f: parseFloat(feelsLikeF.toFixed(1)),
-        feelslike_c: parseFloat(feelsLikeC.toFixed(1)),
-        humidity: Math.round(obs.relativeHumidity?.value || 0),
-        condition: {
-          text: obs.textDescription || 'Clear',
-          icon: obs.icon || ''
-        }
-      }
-    };
-    
-    // Write weather data to Firebase
-    await writeWeatherToFirebase(weatherData);
-    
-    return weatherData;
-  } catch (error) {
-    console.error('Weather API error:', error);
-    // Return fallback data instead of null
-    return {
-      location: {
-        name: 'Rhome',
-        region: 'Texas'
-      },
-      current: {
-        temp_f: 0,
-        temp_c: 0,
-        feelslike_f: 0,
-        feelslike_c: 0,
-        humidity: 0,
-        condition: {
-          text: 'Weather data unavailable',
-          icon: ''
-        }
-      }
-    };
-  }
-};
-
-/**
  * Fetch system logs from Firebase
  */
 export const fetchLogs = async () => {
@@ -297,7 +164,7 @@ export const fetchLogs = async () => {
 export const fetchWeatherHistory = async () => {
   try {
     const response = await fetch(
-      `${CONFIG.FIREBASE_URL}/weather_history.json?orderBy="unix_timestamp"`
+      `${CONFIG.FIREBASE_URL}/weather_history.json`
     );
     if (!response.ok) return [];
     const data = await response.json();
@@ -305,6 +172,7 @@ export const fetchWeatherHistory = async () => {
     if (data) {
       return Object.values(data)
         .sort((a, b) => a.unix_timestamp - b.unix_timestamp)
+        .slice(-100) // Take last 100 weather records
         .map(weather => ({
           ...weather,
           timestamp: weather.timestamp || new Date(weather.unix_timestamp * 1000).toISOString()
@@ -328,26 +196,5 @@ export const fetchAllData = async () => {
     fetchLogs()
   ]);
 
-  // Get the most recent weather from weatherHistory instead of fetching live
-  const weather = weatherHistory && weatherHistory.length > 0 
-    ? {
-        location: {
-          name: LOCATION.name,
-          region: LOCATION.region
-        },
-        current: {
-          temp_f: weatherHistory[weatherHistory.length - 1].temp_f,
-          temp_c: weatherHistory[weatherHistory.length - 1].temp_c,
-          feelslike_f: weatherHistory[weatherHistory.length - 1].temp_f, // Approximation
-          feelslike_c: weatherHistory[weatherHistory.length - 1].temp_c, // Approximation
-          humidity: weatherHistory[weatherHistory.length - 1].humidity,
-          condition: {
-            text: weatherHistory[weatherHistory.length - 1].description,
-            icon: weatherHistory[weatherHistory.length - 1].icon || ''
-          }
-        }
-      }
-    : null;
-
-  return { latest, historical, weather, weatherHistory, logs };
+  return { latest, historical, weatherHistory, logs };
 };

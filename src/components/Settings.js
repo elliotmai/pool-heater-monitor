@@ -11,16 +11,10 @@ import {
   Divider,
   InputAdornment
 } from '@mui/material';
-import { Save, LocationOn } from '@mui/icons-material';
+import { Save } from '@mui/icons-material';
 
 const Settings = () => {
   const [settings, setSettings] = useState({
-    location: {
-      name: 'Rhome',
-      region: 'Texas',
-      lat: 33.0258,
-      lon: -97.5025
-    },
     sensors: {
       Blue: { displayName: 'Heater Input', color: '#007aff' },
       Red: { displayName: 'Heater Output', color: '#ff3b30' },
@@ -44,17 +38,6 @@ const Settings = () => {
       console.error('Error loading settings:', error);
     }
   }, []);
-
-  const handleLocationChange = (field, value) => {
-    setSettings(prev => ({
-      ...prev,
-      location: {
-        ...prev.location,
-        [field]: value
-      }
-    }));
-    setHasChanges(true);
-  };
 
   const handleSensorChange = (sensorKey, field, value) => {
     setSettings(prev => ({
@@ -90,12 +73,6 @@ const Settings = () => {
 
   const handleReset = () => {
     const defaultSettings = {
-      location: {
-        name: 'Rhome',
-        region: 'Texas',
-        lat: 33.0258,
-        lon: -97.5025
-      },
       sensors: {
         Blue: { displayName: 'Heater Input', color: '#007aff' },
         Red: { displayName: 'Heater Output', color: '#ff3b30' },
@@ -115,80 +92,6 @@ const Settings = () => {
 
   return (
     <Box sx={{ p: 2 }}>
-      {/* Location Settings */}
-      <Card sx={{ boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)', mb: 2 }}>
-        <CardContent>
-          <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-            <LocationOn sx={{ mr: 1, color: '#007aff' }} />
-            <Typography 
-              variant="h6" 
-              sx={{ 
-                fontSize: '17px',
-                fontWeight: 600,
-                color: '#1c1c1e'
-              }}
-            >
-              Location Settings
-            </Typography>
-          </Box>
-          
-          <Typography 
-            variant="body2" 
-            sx={{ 
-              fontSize: '13px',
-              color: '#8e8e93',
-              mb: 2
-            }}
-          >
-            Set your location for accurate weather data from weather.gov
-          </Typography>
-
-          <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <TextField
-              label="Location Name"
-              value={settings.location.name}
-              onChange={(e) => handleLocationChange('name', e.target.value)}
-              fullWidth
-              size="small"
-              variant="outlined"
-            />
-            
-            <TextField
-              label="Region/State"
-              value={settings.location.region}
-              onChange={(e) => handleLocationChange('region', e.target.value)}
-              fullWidth
-              size="small"
-              variant="outlined"
-            />
-            
-            <Box sx={{ display: 'flex', gap: 2 }}>
-              <TextField
-                label="Latitude"
-                type="number"
-                value={settings.location.lat}
-                onChange={(e) => handleLocationChange('lat', parseFloat(e.target.value))}
-                fullWidth
-                size="small"
-                variant="outlined"
-                inputProps={{ step: 0.0001 }}
-              />
-              
-              <TextField
-                label="Longitude"
-                type="number"
-                value={settings.location.lon}
-                onChange={(e) => handleLocationChange('lon', parseFloat(e.target.value))}
-                fullWidth
-                size="small"
-                variant="outlined"
-                inputProps={{ step: 0.0001 }}
-              />
-            </Box>
-          </Box>
-        </CardContent>
-      </Card>
-
       {/* Sensor Settings */}
       <Card sx={{ boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)', mb: 2 }}>
         <CardContent>

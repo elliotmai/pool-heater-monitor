@@ -8,7 +8,7 @@ import {
   BottomNavigation,
   BottomNavigationAction,
   CircularProgress,
-  Alert,
+  Alert
 } from '@mui/material';
 import { 
   // Refresh, 
@@ -32,7 +32,7 @@ function App() {
   const [data, setData] = useState({
     latest: null,
     historical: [],
-    weather: null,
+    weatherHistory: [],
     logs: []
   });
   const [loading, setLoading] = useState(true);
@@ -62,12 +62,12 @@ function App() {
   const renderTabContent = () => {
     switch (currentTab) {
       case 0:
-        return <Overview latest={data.latest} weather={data.weather} weatherHistory={data.weatherHistory} />;
+        return <Overview latest={data.latest} />;
       case 1:
         return <Trends latest={data.latest} historical={data.historical} weatherHistory={data.weatherHistory} />;
       case 2:
         return <Logs logs={data.logs} />;
-        case 3:
+      case 3:
         return <Settings />;
       default:
         return null;
