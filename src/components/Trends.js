@@ -59,13 +59,12 @@ const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) =>
     }
 
     // Calculate the time window based on frozenNow and offset
-    const endTime = frozenNow.getTime() - timeOffset * hoursToShow * 60 * 60 * 1000;
-    const startTime = endTime - hoursToShow * 60 * 60 * 1000;
+    const startTime = frozenNow.getTime() - timeOffset * hoursToShow * 60 * 60 * 1000;
     
     return historical.filter(reading => {
       if (!reading.unix_timestamp) return true;
       const readingTime = reading.unix_timestamp * 1000;
-      return readingTime >= startTime && readingTime < endTime;
+      return readingTime >= startTime;
     });
   }, [historical, timeFilter, timeOffset, frozenNow]);
 
