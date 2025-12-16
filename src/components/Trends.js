@@ -84,7 +84,6 @@ const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) =>
     }
 
     const startTime = frozenNow.getTime() - ((timeOffset + 1) * hoursToShow * 60 * 60 * 1000);
-    const endTime = startTime + (hoursToShow * 60 * 60 * 1000);
 
     // Check if there is any data before the current time window
     return historical.some(reading => {
