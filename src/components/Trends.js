@@ -8,6 +8,12 @@ const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) =>
   const [chartView, setChartView] = useState('all');
   const [timeFilter, setTimeFilter] = useState('24h');
   const [timeOffset, setTimeOffset] = useState(0); // 0 = current, 1 = one period back, etc.
+  const [frozenNow, setFrozenNow] = useState(() => new Date()); // Freeze the current time
+
+  // Update frozenNow whenever timeOffset or timeFilter changes
+  useEffect(() => {
+    setFrozenNow(new Date());
+  }, [timeOffset, timeFilter]);
 
   // Get sensor config from settings
   const SENSOR_CONFIG = getSensorConfig();
@@ -34,9 +40,7 @@ const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) =>
   const filteredHistorical = useMemo(() => {
     if (!historical || historical.length === 0) return [];
     
-    const now = new Date();
     let hoursToShow;
-    
     switch (timeFilter) {
       case '1h':
         hoursToShow = 1;
@@ -53,25 +57,24 @@ const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) =>
       default:
         hoursToShow = 24;
     }
-    
-    // Calculate the time window based on offset
-    const endTime = now.getTime() - (timeOffset * hoursToShow * 60 * 60 * 1000);
-    const startTime = endTime - (hoursToShow * 60 * 60 * 1000);
+
+    // Calculate the time window based on frozenNow and offset
+    const endTime = frozenNow.getTime() - timeOffset * hoursToShow * 60 * 60 * 1000;
+    const startTime = endTime - hoursToShow * 60 * 60 * 1000;
     
     return historical.filter(reading => {
       if (!reading.unix_timestamp) return true;
       const readingTime = reading.unix_timestamp * 1000;
       return readingTime >= startTime && readingTime < endTime;
     });
-  }, [historical, timeFilter, timeOffset]);
+  }, [historical, timeFilter, timeOffset, frozenNow]);
 
   // Check if we can go back or forward
   const canGoBack = useMemo(() => {
     if (!historical || historical.length === 0) return false;
     const oldestTimestamp = Math.min(...historical.map(r => r.unix_timestamp || Infinity));
     if (oldestTimestamp === Infinity) return false;
-    
-    const now = new Date();
+
     let hoursToShow;
     switch (timeFilter) {
       case '1h': hoursToShow = 1; break;
@@ -80,10 +83,16 @@ const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) =>
       case '24h': hoursToShow = 24; break;
       default: hoursToShow = 24;
     }
-    
-    const startTime = now.getTime() - ((timeOffset + 1) * hoursToShow * 60 * 60 * 1000);
-    return (oldestTimestamp * 1000) < startTime;
-  }, [historical, timeFilter, timeOffset]);
+
+    const startTime = frozenNow.getTime() - ((timeOffset + 1) * hoursToShow * 60 * 60 * 1000);
+    const endTime = startTime + (hoursToShow * 60 * 60 * 1000);
+
+    // Check if there is any data before the current time window
+    return historical.some(reading => {
+      const readingTime = reading.unix_timestamp * 1000;
+      return readingTime < startTime && readingTime >= (oldestTimestamp * 1000);
+    });
+  }, [historical, timeFilter, timeOffset, frozenNow]);
 
   const canGoForward = timeOffset > 0;
 
