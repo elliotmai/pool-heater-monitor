@@ -56,8 +56,9 @@ export const fetchLatestData = async () => {
 
 /**
  * Fetch historical sensor readings with merged weather data
+ * @param {number} timeOffset - Number of days back to fetch data for (0 = current day, 1 = one day back, etc.)
  */
-export const fetchHistoricalData = async () => {
+export const fetchHistoricalData = async (timeOffset = 0) => {
   try {
     const [sensorsResponse, weatherResponse] = await Promise.all([
       fetch(`${CONFIG.FIREBASE_URL}/readings.json`),
@@ -78,17 +79,23 @@ export const fetchHistoricalData = async () => {
     }
     
     if (sensorsData) {
-      // Convert to array and sort by unix_timestamp, then take last 100
+      // Calculate the start and end timestamps for the desired day
+      const now = new Date();
+      now.setHours(0, 0, 0, 0); // Start of the current day
+      const startOfDay = now.getTime() - timeOffset * 24 * 60 * 60 * 1000;
+      const endOfDay = startOfDay + 24 * 60 * 60 * 1000;
+
+      // Convert to array, filter by the desired day, and sort by unix_timestamp
       const readings = Object.values(sensorsData)
+        .filter(reading => reading.unix_timestamp * 1000 >= startOfDay && reading.unix_timestamp * 1000 < endOfDay)
         .sort((a, b) => (a.unix_timestamp || 0) - (b.unix_timestamp || 0))
-        .slice(-100) // Take last 100 readings
         .map(reading => {
           const date = new Date(reading.timestamp);
           const time = date.toLocaleTimeString('en-US', { 
             hour: '2-digit', 
             minute: '2-digit' 
           });
-          
+
           // Find matching weather data (within 5 minutes)
           let matchingWeather = weatherMap[reading.unix_timestamp];
           if (!matchingWeather) {
@@ -101,7 +108,7 @@ export const fetchHistoricalData = async () => {
               matchingWeather = weatherMap[closest];
             }
           }
-          
+
           return {
             time,
             timestamp: reading.timestamp,
@@ -115,7 +122,7 @@ export const fetchHistoricalData = async () => {
             weather_description: matchingWeather?.description || null
           };
         });
-      
+
       return readings;
     }
     return [];
