@@ -1,10 +1,10 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Box, Card, CardContent, Typography, ToggleButtonGroup, ToggleButton, IconButton } from '@mui/material';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area, ComposedChart, Bar } from 'recharts';
 import { ArrowBack, ArrowForward } from '@mui/icons-material';
 import { getSensorConfig } from '../config/settingsUtils';
 
-const Trends = ({ latest, historical, weatherHistory }) => {
+const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) => {
   const [chartView, setChartView] = useState('all');
   const [timeFilter, setTimeFilter] = useState('24h');
   const [timeOffset, setTimeOffset] = useState(0); // 0 = current, 1 = one period back, etc.
@@ -24,6 +24,11 @@ const Trends = ({ latest, historical, weatherHistory }) => {
       setTimeOffset(0); // Reset offset when changing time filter
     }
   };
+
+  // Fetch new historical data when timeOffset changes
+  useEffect(() => {
+    updateHistoricalData(timeOffset);
+  }, [timeOffset, updateHistoricalData]);
 
   // Filter data based on time selection
   const filteredHistorical = useMemo(() => {
@@ -209,7 +214,7 @@ const Trends = ({ latest, historical, weatherHistory }) => {
             )}
           </Box>
           <IconButton 
-            onClick={() => setTimeOffset(prev => prev - 1)}
+            onClick={() => setTimeOffset(prev => Math.max(0, prev - 1))}
             disabled={!canGoForward}
             size="small"
             sx={{ 

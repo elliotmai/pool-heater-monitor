@@ -23,7 +23,7 @@ import Overview from './components/Overview';
 import Trends from './components/Trends';
 import Logs from './components/Logs';
 import Settings from './components/Settings';
-import { fetchAllData } from './services/api';
+import { fetchAllData, fetchHistoricalData } from './services/api';
 import { CONFIG } from './config/config';
 import './App.css';
 
@@ -38,11 +38,12 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const refreshData = async () => {
+  const refreshData = async (offset = 0) => {
     try {
       setError(null);
       const newData = await fetchAllData();
-      setData(newData);
+      const updatedHistorical = await fetchHistoricalData(offset);
+      setData({ ...newData, historical: updatedHistorical });
       setLoading(false);
     } catch (err) {
       setError('Failed to load data. Please try again.');
@@ -64,7 +65,14 @@ function App() {
       case 0:
         return <Overview latest={data.latest} />;
       case 1:
-        return <Trends latest={data.latest} historical={data.historical} weatherHistory={data.weatherHistory} />;
+        return (
+          <Trends 
+            latest={data.latest} 
+            historical={data.historical} 
+            weatherHistory={data.weatherHistory} 
+            updateHistoricalData={(offset) => refreshData(offset)} 
+          />
+        );
       case 2:
         return <Logs logs={data.logs} />;
       case 3:
