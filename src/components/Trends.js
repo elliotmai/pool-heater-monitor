@@ -1,23 +1,17 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useMemo } from 'react';
 import { Box, Card, CardContent, Typography, ToggleButtonGroup, ToggleButton, IconButton } from '@mui/material';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area, ComposedChart, Bar } from 'recharts';
 import { ArrowBack, ArrowForward } from '@mui/icons-material';
 import { getSensorConfig } from '../config/settingsUtils';
 
-const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) => {
+const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
   const [chartView, setChartView] = useState('all');
   const [timeFilter, setTimeFilter] = useState('24h');
-  const [timeOffset, setTimeOffset] = useState(0); // 0 = current, 1 = one period back, etc.
-  const [frozenNow, setFrozenNow] = useState(() => new Date()); // Freeze the current time
-
-  // Update frozenNow whenever timeOffset or timeFilter changes
-  useEffect(() => {
-    setFrozenNow(new Date());
-  }, [timeOffset, timeFilter]);
+  const [viewDate, setViewDate] = useState(new Date());
 
   // Get sensor config from settings
   const SENSOR_CONFIG = getSensorConfig();
-  
+
   const handleViewChange = (event, newView) => {
     if (newView !== null) {
       setChartView(newView);
@@ -27,91 +21,192 @@ const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) =>
   const handleTimeFilterChange = (event, newFilter) => {
     if (newFilter !== null) {
       setTimeFilter(newFilter);
-      setTimeOffset(0); // Reset offset when changing time filter
     }
   };
 
-  // Fetch new historical data when timeOffset changes
-  useEffect(() => {
-    updateHistoricalData(timeOffset);
-  }, [timeOffset, updateHistoricalData]);
+  // Calculate the hours to show based on the time filter
+  const hoursToShow = useMemo(() => {
+    switch (timeFilter) {
+      case '1h': return 1;
+      case '6h': return 6;
+      case '12h': return 12;
+      case '24h': return 24;
+      default: return 24;
+    }
+  }, [timeFilter]);
 
-  // Filter data based on time selection
+  // Calculate the time range being displayed
+  const displayTimeRange = useMemo(() => {
+    const now = new Date();
+    const isToday = viewDate.toDateString() === now.toDateString();
+    
+    let endTime, startTime;
+    
+    if (isToday && hoursToShow < 24) {
+      // For current day with less than 24h view, show from (now - hours) to now
+      endTime = now;
+      startTime = new Date(now.getTime() - (hoursToShow * 60 * 60 * 1000));
+    } else {
+      // For full day or past days, show the entire day
+      startTime = new Date(viewDate);
+      startTime.setHours(0, 0, 0, 0);
+      
+      if (hoursToShow === 24) {
+        endTime = new Date(viewDate);
+        endTime.setHours(23, 59, 59, 999);
+      } else {
+        endTime = new Date(startTime.getTime() + (hoursToShow * 60 * 60 * 1000));
+      }
+    }
+    
+    return { startTime, endTime };
+  }, [viewDate, hoursToShow]);
+
+  // Filter data based on time range
   const filteredHistorical = useMemo(() => {
     if (!historical || historical.length === 0) return [];
     
-    let hoursToShow;
-    switch (timeFilter) {
-      case '1h':
-        hoursToShow = 1;
-        break;
-      case '6h':
-        hoursToShow = 6;
-        break;
-      case '12h':
-        hoursToShow = 12;
-        break;
-      case '24h':
-        hoursToShow = 24;
-        break;
-      default:
-        hoursToShow = 24;
-    }
+    const { startTime, endTime } = displayTimeRange;
+    const startTimestamp = startTime.getTime();
+    const endTimestamp = endTime.getTime();
 
-    // Calculate the time window based on frozenNow and offset
-    const startTime = frozenNow.getTime() - timeOffset * hoursToShow * 60 * 60 * 1000;
-    
+    // Filter readings within the time window
     return historical.filter(reading => {
-      if (!reading.unix_timestamp) return true;
+      if (!reading.unix_timestamp) return false;
       const readingTime = reading.unix_timestamp * 1000;
-      return readingTime >= startTime;
+      return readingTime >= startTimestamp && readingTime <= endTimestamp;
     });
-  }, [historical, timeFilter, timeOffset, frozenNow]);
+  }, [historical, displayTimeRange]);
 
-  // Check if we can go back or forward
-  const canGoBack = useMemo(() => {
-    if (!historical || historical.length === 0) return false;
-    const oldestTimestamp = Math.min(...historical.map(r => r.unix_timestamp || Infinity));
-    if (oldestTimestamp === Infinity) return false;
+  // Navigate to previous day
+  const goToPreviousDay = () => {
+    const newDate = new Date(viewDate);
+    newDate.setDate(newDate.getDate() - 1);
+    setViewDate(newDate);
+    onDateChange(newDate);
+  };
 
-    let hoursToShow;
-    switch (timeFilter) {
-      case '1h': hoursToShow = 1; break;
-      case '6h': hoursToShow = 6; break;
-      case '12h': hoursToShow = 12; break;
-      case '24h': hoursToShow = 24; break;
-      default: hoursToShow = 24;
+  // Navigate to next day
+  const goToNextDay = () => {
+    const newDate = new Date(viewDate);
+    newDate.setDate(newDate.getDate() + 1);
+    setViewDate(newDate);
+    onDateChange(newDate);
+  };
+
+  // Navigate to today
+  const goToToday = () => {
+    const today = new Date();
+    setViewDate(today);
+    onDateChange(today);
+  };
+
+  // Check if we can go forward (not already at today)
+  const canGoForward = useMemo(() => {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const view = new Date(viewDate);
+    view.setHours(0, 0, 0, 0);
+    return view < today;
+  }, [viewDate]);
+
+  const isToday = useMemo(() => {
+    const today = new Date();
+    return viewDate.toDateString() === today.toDateString();
+  }, [viewDate]);
+
+  // Calculate temperature differentials and merge with weather history
+  const dataWithDifferentials = useMemo(() => {
+    // Create a map of weather data by timestamp for quick lookup
+    const weatherMap = {};
+    if (weatherHistory && weatherHistory.length > 0) {
+      weatherHistory.forEach(weather => {
+        if (weather.unix_timestamp) {
+          weatherMap[weather.unix_timestamp] = weather;
+        }
+      });
     }
-
-    const startTime = frozenNow.getTime() - ((timeOffset + 1) * hoursToShow * 60 * 60 * 1000);
-    // const endTime = startTime + (hoursToShow * 60 * 60 * 1000);
-
-    // Check if there is any data before the current time window
-    return historical.some(reading => {
-      const readingTime = reading.unix_timestamp * 1000;
-      return readingTime < startTime && readingTime >= (oldestTimestamp * 1000);
+    
+    const result = filteredHistorical.map(reading => {
+      // Find matching weather data (within 5 minutes = 300 seconds)
+      let matchingWeather = weatherMap[reading.unix_timestamp];
+      if (!matchingWeather && reading.unix_timestamp) {
+        // Try to find weather within 5 minutes
+        const timestamps = Object.keys(weatherMap).map(Number);
+        const closest = timestamps.find(t => 
+          Math.abs(t - reading.unix_timestamp) <= 300
+        );
+        if (closest) {
+          matchingWeather = weatherMap[closest];
+        }
+      }
+      
+      return {
+        ...reading,
+        heater_differential: reading.Red && reading.Blue ? reading.Red - reading.Blue : null,
+        avg_temp: reading.Blue && reading.Red && reading.Yellow && reading.Green 
+          ? (reading.Blue + reading.Red + reading.Yellow + reading.Green) / 4 
+          : null,
+        outdoor_temp: matchingWeather?.temp_f || reading.outdoor_temp || null,
+        outdoor_humidity: matchingWeather?.humidity || reading.outdoor_humidity || null,
+        weather_description: matchingWeather?.description || reading.weather_description || null
+      };
     });
-  }, [historical, timeFilter, timeOffset, frozenNow]);
+    
+    // // Debug logging
+    // if (result.length > 0) {
+    //   console.log('Sample data with weather:', {
+    //     time: result[0].time,
+    //     outdoor_temp: result[0].outdoor_temp,
+    //     avg_temp: result[0].avg_temp,
+    //     weather_description: result[0].weather_description
+    //   });
+    //   console.log('Weather history available:', weatherHistory?.length || 0);
+    // }
+    
+    return result;
+  }, [filteredHistorical, weatherHistory]);
 
-  const canGoForward = timeOffset > 0;
+  // Check if we have outdoor temperature data
+  const hasOutdoorData = useMemo(() => {
+    const hasData = dataWithDifferentials.some(reading => 
+      reading.outdoor_temp !== null && reading.outdoor_temp !== undefined
+    );
+    // console.log('Has outdoor data:', hasData, 'Total readings:', dataWithDifferentials.length);
+    return hasData;
+  }, [dataWithDifferentials]);
 
-  // Calculate temperature differentials - outdoor_temp already included from historical data
-  const dataWithDifferentials = filteredHistorical?.map(reading => ({
-    ...reading,
-    heater_differential: reading.Red && reading.Blue ? reading.Red - reading.Blue : null,
-    avg_temp: reading.Blue && reading.Red && reading.Yellow && reading.Green 
-      ? (reading.Blue + reading.Red + reading.Yellow + reading.Green) / 4 
-      : null
-  })) || [];
-
-  // Check if we have outdoor temperature data in the historical readings
-  const hasOutdoorData = dataWithDifferentials.some(reading => 
-    reading.outdoor_temp !== null && reading.outdoor_temp !== undefined
-  );
-
-  // Debug log
-  console.log('Has outdoor data:', hasOutdoorData);
-  console.log('Sample reading:', dataWithDifferentials[0]);
+  // Format time range for display
+  const formatTimeRange = () => {
+    const { startTime, endTime } = displayTimeRange;
+    
+    if (hoursToShow === 24) {
+      return viewDate.toLocaleDateString('en-US', { 
+        weekday: 'short',
+        month: 'short', 
+        day: 'numeric',
+        year: 'numeric'
+      });
+    } else {
+      const formatTime = (date) => date.toLocaleTimeString('en-US', { 
+        hour: 'numeric', 
+        minute: '2-digit',
+        hour12: true
+      });
+      
+      const formatDate = (date) => date.toLocaleDateString('en-US', { 
+        month: 'short', 
+        day: 'numeric'
+      });
+      
+      // If times span different days
+      if (startTime.toDateString() !== endTime.toDateString()) {
+        return `${formatDate(startTime)} ${formatTime(startTime)} - ${formatDate(endTime)} ${formatTime(endTime)}`;
+      } else {
+        return `${formatDate(startTime)}, ${formatTime(startTime)} - ${formatTime(endTime)}`;
+      }
+    }
+  };
 
   return (
     <Box sx={{ p: 2 }}>
@@ -179,14 +274,10 @@ const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) =>
         {/* Time Navigation */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           <IconButton 
-            onClick={() => setTimeOffset(prev => prev + 1)}
-            disabled={!canGoBack}
+            onClick={goToPreviousDay}
             size="small"
             sx={{ 
               color: '#007aff',
-              '&.Mui-disabled': {
-                color: '#c7c7cc'
-              }
             }}
           >
             <ArrowBack fontSize="small" />
@@ -196,17 +287,18 @@ const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) =>
               variant="caption" 
               sx={{ 
                 fontSize: '11px',
-                color: '#8e8e93',
-                minWidth: '120px',
+                color: '#1c1c1e',
+                fontWeight: 500,
+                minWidth: '200px',
                 textAlign: 'center'
               }}
             >
-              {timeOffset === 0 ? 'Current' : `${timeOffset} period${timeOffset > 1 ? 's' : ''} ago`}
+              {formatTimeRange()}
             </Typography>
-            {timeOffset > 0 && (
+            {!isToday && (
               <Typography
                 variant="caption"
-                onClick={() => setTimeOffset(0)}
+                onClick={goToToday}
                 sx={{
                   fontSize: '10px',
                   color: '#007aff',
@@ -217,12 +309,12 @@ const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) =>
                   }
                 }}
               >
-                Now
+                Jump to today
               </Typography>
             )}
           </Box>
           <IconButton 
-            onClick={() => setTimeOffset(prev => Math.max(0, prev - 1))}
+            onClick={goToNextDay}
             disabled={!canGoForward}
             size="small"
             sx={{ 
@@ -235,11 +327,37 @@ const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) =>
             <ArrowForward fontSize="small" />
           </IconButton>
         </Box>
+
+        {/* Data availability info */}
+        {filteredHistorical.length === 0 && (
+          <Typography 
+            variant="caption" 
+            sx={{ 
+              fontSize: '10px',
+              color: '#ff3b30',
+              textAlign: 'center',
+            }}
+          >
+            No data available for this time period
+          </Typography>
+        )}
+        {filteredHistorical.length > 0 && (
+          <Typography 
+            variant="caption" 
+            sx={{ 
+              fontSize: '10px',
+              color: '#8e8e93',
+              textAlign: 'center',
+            }}
+          >
+            {filteredHistorical.length} readings
+          </Typography>
+        )}
       </Box>
 
       {/* All Sensors Chart */}
       {chartView === 'all' && (
-        <Card sx={{ boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)', mb: 2 }}>
+        <Card sx={{ boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)' }}>
           <CardContent>
             <Typography 
               variant="overline" 
@@ -253,14 +371,14 @@ const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) =>
                 mb: 1
               }}
             >
-              All Temperature Sensors {hasOutdoorData && '+ Outdoor'}
+              All Temperature Sensors
             </Typography>
             
-            <Box sx={{ mt: 2, height: 350 }}>
-              {dataWithDifferentials && dataWithDifferentials.length > 0 ? (
+            <Box sx={{ mt: 2, height: 300 }}>
+              {filteredHistorical && filteredHistorical.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
                   <LineChart 
-                    data={dataWithDifferentials}
+                    data={filteredHistorical}
                     margin={{ top: 5, right: 10, left: 0, bottom: 5 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(0, 0, 0, 0.05)" />
@@ -288,12 +406,9 @@ const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) =>
                         fontSize: '11px',
                         color: 'white'
                       }}
-                      formatter={(value) => [`${value?.toFixed(1)}°F`]}
+                      formatter={(value) => (value != null && typeof value === 'number') ? [`${value.toFixed(1)}°F`] : ['N/A']}
                     />
-                    <Legend 
-                      wrapperStyle={{ fontSize: '11px', paddingTop: '10px', color: 'black' }}
-                    />
-                    
+                    <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
                     {Object.entries(SENSOR_CONFIG).map(([sensorName, config]) => (
                       <Line
                         key={sensorName}
@@ -306,9 +421,7 @@ const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) =>
                         activeDot={{ r: 4 }}
                       />
                     ))}
-                    
-                    {hasOutdoorData && (
-                      <Line
+                    <Line
                         type="monotone"
                         dataKey="outdoor_temp"
                         stroke="grey"
@@ -316,9 +429,7 @@ const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) =>
                         strokeDasharray="5 5"
                         name="Outdoor Temp"
                         dot={false}
-                        activeDot={{ r: 4 }}
                       />
-                    )}
                   </LineChart>
                 </ResponsiveContainer>
               ) : (
@@ -331,7 +442,7 @@ const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) =>
                     color: '#8e8e93'
                   }}
                 >
-                  <Typography variant="body2">No historical data available</Typography>
+                  <Typography variant="body2">No data available for this time period</Typography>
                 </Box>
               )}
             </Box>
@@ -356,26 +467,16 @@ const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) =>
                   mb: 1
                 }}
               >
-                Heater Input vs Output
+                Heater Input/Output
               </Typography>
               
               <Box sx={{ mt: 2, height: 300 }}>
                 {filteredHistorical && filteredHistorical.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart 
+                    <LineChart 
                       data={filteredHistorical}
                       margin={{ top: 5, right: 10, left: 0, bottom: 5 }}
                     >
-                      <defs>
-                        <linearGradient id="colorBlue" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor={SENSOR_CONFIG.Blue.color} stopOpacity={0.3}/>
-                          <stop offset="95%" stopColor={SENSOR_CONFIG.Blue.color} stopOpacity={0}/>
-                        </linearGradient>
-                        <linearGradient id="colorRed" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor={SENSOR_CONFIG.Red.color} stopOpacity={0.3}/>
-                          <stop offset="95%" stopColor={SENSOR_CONFIG.Red.color} stopOpacity={0}/>
-                        </linearGradient>
-                      </defs>
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(0, 0, 0, 0.05)" />
                       <XAxis 
                         dataKey="time" 
@@ -401,26 +502,28 @@ const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) =>
                           fontSize: '11px',
                           color: 'white'
                         }}
-                        formatter={(value) => [`${value?.toFixed(1)}°F`]}
+                        formatter={(value) => (value != null && typeof value === 'number') ? [`${value.toFixed(1)}°F`] : ['N/A']}
                       />
                       <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
-                      <Area
+                      <Line
                         type="monotone"
                         dataKey="Blue"
                         stroke={SENSOR_CONFIG.Blue.color}
-                        fillOpacity={1}
-                        fill="url(#colorBlue)"
+                        strokeWidth={2}
                         name={SENSOR_CONFIG.Blue.displayName}
+                        dot={false}
+                        activeDot={{ r: 5 }}
                       />
-                      <Area
+                      <Line
                         type="monotone"
                         dataKey="Red"
                         stroke={SENSOR_CONFIG.Red.color}
-                        fillOpacity={1}
-                        fill="url(#colorRed)"
+                        strokeWidth={2}
                         name={SENSOR_CONFIG.Red.displayName}
+                        dot={false}
+                        activeDot={{ r: 5 }}
                       />
-                    </AreaChart>
+                    </LineChart>
                   </ResponsiveContainer>
                 ) : (
                   <Box 
@@ -432,7 +535,7 @@ const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) =>
                       color: '#8e8e93'
                     }}
                   >
-                    <Typography variant="body2">No historical data available</Typography>
+                    <Typography variant="body2">No data available for this time period</Typography>
                   </Box>
                 )}
               </Box>
@@ -453,7 +556,7 @@ const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) =>
                   mb: 1
                 }}
               >
-                Temperature Gain Through Heater
+                Temperature Differential (Output - Input)
               </Typography>
               
               <Box sx={{ mt: 2, height: 250 }}>
@@ -474,7 +577,7 @@ const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) =>
                       <YAxis 
                         tick={{ fontSize: 11 }}
                         label={{ 
-                          value: 'Temperature Gain (°F)', 
+                          value: 'Δ Temperature (°F)', 
                           angle: -90, 
                           position: 'insideLeft',
                           style: { fontSize: 11 }
@@ -488,13 +591,13 @@ const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) =>
                           fontSize: '11px',
                           color: 'white'
                         }}
-                        formatter={(value) => [`${value?.toFixed(1)}°F`]}
+                        formatter={(value) => (value != null && typeof value === 'number') ? [`${value.toFixed(1)}°F`] : ['N/A']}
                       />
                       <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
                       <Bar
                         dataKey="heater_differential"
-                        fill="#ff9500"
-                        name="Heater Temperature Gain"
+                        fill="#ff3b30"
+                        name="Heater Gain"
                         radius={[4, 4, 0, 0]}
                       />
                     </ComposedChart>
@@ -509,7 +612,7 @@ const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) =>
                       color: '#8e8e93'
                     }}
                   >
-                    <Typography variant="body2">No data available</Typography>
+                    <Typography variant="body2">No data available for this time period</Typography>
                   </Box>
                 )}
               </Box>
@@ -570,7 +673,18 @@ const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) =>
                           fontSize: '11px',
                           color: 'white'
                         }}
-                        formatter={(value) => [`${value?.toFixed(1)}°F`]}
+                        formatter={(value, name) => {
+                          return (value != null && typeof value === 'number') ? [`${value.toFixed(1)}°F`, name] : ['N/A', name];
+                        }}
+                        labelFormatter={(label) => {
+                          // Find the data point for this label to get weather description
+                          const dataPoint = dataWithDifferentials.find(d => d.time === label);
+                          if (dataPoint?.weather_description) {
+                            return `${label} - ${dataPoint.weather_description}`;
+                          }
+                          return label;
+                        }}
+                        labelStyle={{ color: 'white', marginBottom: '4px' }}
                       />
                       <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
                       <Line
@@ -603,7 +717,9 @@ const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) =>
                       color: '#8e8e93'
                     }}
                   >
-                    <Typography variant="body2">Weather data unavailable</Typography>
+                    <Typography variant="body2">
+                      {!hasOutdoorData ? 'Weather data unavailable' : 'No data available for this time period'}
+                    </Typography>
                   </Box>
                 )}
               </Box>
@@ -645,7 +761,9 @@ const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) =>
                       />
                       <YAxis 
                         tick={{ fontSize: 11 }}
-                        tickFormatter={(value) => `${(value * 100).toFixed(0)}%`}
+                        tickFormatter={(value) => {
+                          return (value != null && typeof value === 'number') ? `${(value * 100).toFixed(1)}%` : 'N/A';
+                        }}
                       />
                       <Tooltip 
                         contentStyle={{
@@ -655,7 +773,9 @@ const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) =>
                           fontSize: '11px',
                           color: 'white'
                         }}
-                        formatter={(value, name) => [`${(value * 100).toFixed(1)}%`, name]}
+                        formatter={(value, name) => {
+                          return (value != null && typeof value === 'number') ? [`${(value * 100).toFixed(1)}%`, name] : ['N/A', name];
+                        }}
                       />
                       <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
                       {Object.entries(SENSOR_CONFIG).map(([sensorName, config]) => (
@@ -681,7 +801,7 @@ const Trends = ({ latest, historical, weatherHistory, updateHistoricalData }) =>
                       color: '#8e8e93'
                     }}
                   >
-                    <Typography variant="body2">No data available</Typography>
+                    <Typography variant="body2">No data available for this time period</Typography>
                   </Box>
                 )}
               </Box>

@@ -56,9 +56,10 @@ export const fetchLatestData = async () => {
 
 /**
  * Fetch historical sensor readings with merged weather data
- * @param {number} timeOffset - Number of days back to fetch data for (0 = current day, 1 = one day back, etc.)
+ * Fetches 48 hours of data: the target date and the day before
+ * @param {Date} targetDate - The date to fetch data for (defaults to today)
  */
-export const fetchHistoricalData = async (timeOffset = 0) => {
+export const fetchHistoricalData = async (targetDate = new Date()) => {
   try {
     const [sensorsResponse, weatherResponse] = await Promise.all([
       fetch(`${CONFIG.FIREBASE_URL}/readings.json`),
@@ -79,15 +80,24 @@ export const fetchHistoricalData = async (timeOffset = 0) => {
     }
     
     if (sensorsData) {
-      // Calculate the start and end timestamps for the desired day
-      const now = new Date();
-      now.setHours(0, 0, 0, 0); // Start of the current day
-      const startOfDay = now.getTime() - timeOffset * 24 * 60 * 60 * 1000;
-      const endOfDay = startOfDay + 24 * 60 * 60 * 1000;
+      // Calculate the start of the day before target date and end of target date
+      const dayBefore = new Date(targetDate);
+      dayBefore.setDate(dayBefore.getDate() - 1);
+      dayBefore.setHours(0, 0, 0, 0);
+      
+      const endOfTargetDay = new Date(targetDate);
+      endOfTargetDay.setHours(23, 59, 59, 999);
+      
+      const startTimestamp = dayBefore.getTime();
+      const endTimestamp = endOfTargetDay.getTime();
 
-      // Convert to array, filter by the desired day, and sort by unix_timestamp
+      // Filter readings for the 48-hour period and sort by unix_timestamp
       const readings = Object.values(sensorsData)
-        .filter(reading => reading.unix_timestamp * 1000 >= startOfDay && reading.unix_timestamp * 1000 < endOfDay)
+        .filter(reading => {
+          if (!reading.unix_timestamp) return false;
+          const readingTime = reading.unix_timestamp * 1000;
+          return readingTime >= startTimestamp && readingTime <= endTimestamp;
+        })
         .sort((a, b) => (a.unix_timestamp || 0) - (b.unix_timestamp || 0))
         .map(reading => {
           const date = new Date(reading.timestamp);
@@ -195,10 +205,10 @@ export const fetchWeatherHistory = async () => {
 /**
  * Fetch all data in parallel
  */
-export const fetchAllData = async () => {
+export const fetchAllData = async (targetDate) => {
   const [latest, historical, weatherHistory, logs] = await Promise.all([
     fetchLatestData(),
-    fetchHistoricalData(),
+    fetchHistoricalData(targetDate),
     fetchWeatherHistory(),
     fetchLogs()
   ]);
