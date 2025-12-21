@@ -176,6 +176,41 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
     return hasData;
   }, [dataWithDifferentials]);
 
+  // Calculate Y-axis domain for temperature charts (min/max ± 20°F)
+  const temperatureDomain = useMemo(() => {
+    if (!filteredHistorical || filteredHistorical.length === 0) {
+      return ['auto', 'auto'];
+    }
+
+    const allTemps = [];
+    
+    // Collect all temperature values from all sensors
+    filteredHistorical.forEach(reading => {
+      Object.keys(SENSOR_CONFIG).forEach(sensorName => {
+        const temp = reading[sensorName];
+        if (temp !== null && temp !== undefined && typeof temp === 'number') {
+          allTemps.push(temp);
+        }
+      });
+      
+      // Include outdoor temp if available
+      if (reading.outdoor_temp !== null && reading.outdoor_temp !== undefined) {
+        allTemps.push(reading.outdoor_temp);
+      }
+    });
+
+    if (allTemps.length === 0) {
+      return ['auto', 'auto'];
+    }
+
+    const minTemp = Math.min(...allTemps);
+    const maxTemp = Math.max(...allTemps);
+
+    // Add ±5°F padding
+    return [Math.floor(minTemp - 2), Math.ceil(maxTemp + 2)];
+  }, [filteredHistorical, SENSOR_CONFIG]);
+
+
   // Format time range for display
   const formatTimeRange = () => {
     const { startTime, endTime } = displayTimeRange;
@@ -237,8 +272,8 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
           }}
         >
           <ToggleButton value="all">All Sensors</ToggleButton>
-          <ToggleButton value="heater">Heater Performance</ToggleButton>
-          <ToggleButton value="comparison">Indoor vs Outdoor</ToggleButton>
+          {/* <ToggleButton value="heater">Heater Performance</ToggleButton>
+          <ToggleButton value="comparison">Indoor vs Outdoor</ToggleButton> */}
         </ToggleButtonGroup>
 
         {/* Time Filter */}
@@ -390,6 +425,7 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
                       height={60}
                     />
                     <YAxis 
+                      domain={temperatureDomain}
                       tick={{ fontSize: 11 }}
                       label={{ 
                         value: 'Temperature (°F)', 
@@ -449,7 +485,7 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
           </CardContent>
         </Card>
       )}
-
+ 
       {/* Heater Performance Chart */}
       {chartView === 'heater' && (
         <>
@@ -808,7 +844,7 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
             </CardContent>
           </Card>
         </>
-      )}
+      )} 
 
       <Typography 
         variant="caption" 

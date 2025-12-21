@@ -38,14 +38,17 @@ export const fetchLatestData = async () => {
     
     // Convert all temperatures to Fahrenheit
     if (transformed) {
-      return {
-        ...transformed,
-        Blue: celsiusToFahrenheit(transformed.Blue),
-        Red: celsiusToFahrenheit(transformed.Red),
-        Yellow: celsiusToFahrenheit(transformed.Yellow),
-        Green: celsiusToFahrenheit(transformed.Green),
-        weather: latestWeather
-      };
+      const converted = { ...transformed };
+      
+      // Convert each numeric property (temperature sensors) to Fahrenheit
+      Object.keys(converted).forEach(key => {
+        if (typeof converted[key] === 'number') {
+          converted[key] = celsiusToFahrenheit(converted[key]);
+        }
+      });
+      
+      converted.weather = latestWeather;
+      return converted;
     }
     return null;
   } catch (error) {
@@ -118,19 +121,26 @@ export const fetchHistoricalData = async (targetDate = new Date()) => {
               matchingWeather = weatherMap[closest];
             }
           }
-
-          return {
+          // Build base result object
+          const result = {
             time,
             timestamp: reading.timestamp,
             unix_timestamp: reading.unix_timestamp,
-            Blue: celsiusToFahrenheit(reading.Blue),
-            Red: celsiusToFahrenheit(reading.Red),
-            Yellow: celsiusToFahrenheit(reading.Yellow),
-            Green: celsiusToFahrenheit(reading.Green),
-            outdoor_temp: matchingWeather?.temp_f || null,
-            outdoor_humidity: matchingWeather?.humidity || null,
-            weather_description: matchingWeather?.description || null
           };
+
+          // Convert all numeric sensor values to Fahrenheit
+          Object.keys(reading).forEach(key => {
+            if (typeof reading[key] === 'number' && key !== 'unix_timestamp') {
+              result[key] = celsiusToFahrenheit(reading[key]);
+            }
+          });
+
+          // Add weather data
+          result.outdoor_temp = matchingWeather?.temp_f || null;
+          result.outdoor_humidity = matchingWeather?.humidity || null;
+          result.weather_description = matchingWeather?.description || null;
+
+          return result;
         });
 
       return readings;
