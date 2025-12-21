@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Box, 
-  Card, 
-  CardContent, 
-  Typography, 
+import {
+  Box,
+  Card,
+  CardContent,
+  Typography,
   TextField,
   Button,
   Alert,
@@ -16,13 +16,16 @@ import { Save } from '@mui/icons-material';
 const Settings = () => {
   const [settings, setSettings] = useState({
     sensors: {
-      Blue: { displayName: 'Heater Input', color: '#007aff' },
-      Red: { displayName: 'Heater Output', color: '#ff3b30' },
-      Yellow: { displayName: 'Pool Return', color: '#ffcc00' },
-      Green: { displayName: 'Pool Supply', color: '#34c759' }
+      Blue: { displayName: 'Blue Sensor', color: '#007aff' },
+      Red: { displayName: 'Red Sensor', color: '#ff3b30' },
+      Yellow: { displayName: 'Yellow Sensor', color: '#ffcc00' },
+      Green: { displayName: 'Green Sensor', color: '#34c759' },
+      OriaCH1: { displayName: 'Oria Sensor 1', color: '#8e44ad' },
+      OriaCH2: { displayName: 'Oria Sensor 2', color: '#dca225' },
+      OriaCH3: { displayName: 'Oria Sensor 3', color: '#f9abdf' },
     }
   });
-  
+
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [hasChanges, setHasChanges] = useState(false);
 
@@ -56,17 +59,17 @@ const Settings = () => {
   const handleSave = () => {
     try {
       localStorage.setItem('poolHeaterSettings', JSON.stringify(settings));
-      setSnackbar({ 
-        open: true, 
-        message: 'Settings saved successfully! Please refresh the page to see changes.', 
-        severity: 'success' 
+      setSnackbar({
+        open: true,
+        message: 'Settings saved successfully! Please refresh the page to see changes.',
+        severity: 'success'
       });
       setHasChanges(false);
     } catch (error) {
-      setSnackbar({ 
-        open: true, 
-        message: 'Error saving settings: ' + error.message, 
-        severity: 'error' 
+      setSnackbar({
+        open: true,
+        message: 'Error saving settings: ' + error.message,
+        severity: 'error'
       });
     }
   };
@@ -74,18 +77,21 @@ const Settings = () => {
   const handleReset = () => {
     const defaultSettings = {
       sensors: {
-        Blue: { displayName: 'Heater Input', color: '#007aff' },
-        Red: { displayName: 'Heater Output', color: '#ff3b30' },
-        Yellow: { displayName: 'Pool Return', color: '#ffcc00' },
-        Green: { displayName: 'Pool Supply', color: '#34c759' }
+        Blue: { displayName: 'Blue Sensor', color: '#007aff' },
+        Red: { displayName: 'Red Sensor', color: '#ff3b30' },
+        Yellow: { displayName: 'Yellow Sensor', color: '#ffcc00' },
+        Green: { displayName: 'Green Sensor', color: '#34c759' },
+        OriaCH1: { displayName: 'Oria Sensor 1', color: '#8e44ad' },
+        OriaCH2: { displayName: 'Oria Sensor 2', color: '#dca225' },
+        OriaCH3: { displayName: 'Oria Sensor 3', color: '#f9abdf' },
       }
     };
     setSettings(defaultSettings);
     localStorage.setItem('poolHeaterSettings', JSON.stringify(defaultSettings));
-    setSnackbar({ 
-      open: true, 
-      message: 'Settings reset to defaults. Please refresh the page.', 
-      severity: 'info' 
+    setSnackbar({
+      open: true,
+      message: 'Settings reset to defaults. Please refresh the page.',
+      severity: 'info'
     });
     setHasChanges(false);
   };
@@ -95,9 +101,9 @@ const Settings = () => {
       {/* Sensor Settings */}
       <Card sx={{ boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)', mb: 2 }}>
         <CardContent>
-          <Typography 
-            variant="h6" 
-            sx={{ 
+          <Typography
+            variant="h6"
+            sx={{
               fontSize: '17px',
               fontWeight: 600,
               color: '#1c1c1e',
@@ -106,10 +112,10 @@ const Settings = () => {
           >
             Sensor Configuration
           </Typography>
-          
-          <Typography 
-            variant="body2" 
-            sx={{ 
+
+          <Typography
+            variant="body2"
+            sx={{
               fontSize: '13px',
               color: '#8e8e93',
               mb: 2
@@ -121,18 +127,18 @@ const Settings = () => {
           {Object.entries(settings.sensors).map(([key, sensor], index) => (
             <Box key={key}>
               {index > 0 && <Divider sx={{ my: 2 }} />}
-              <Typography 
-                variant="subtitle2" 
-                sx={{ 
+              <Typography
+                variant="subtitle2"
+                sx={{
                   fontSize: '15px',
                   fontWeight: 600,
                   color: '#1c1c1e',
                   mb: 1.5
                 }}
               >
-                {key} Sensor
+                {sensor.displayName}
               </Typography>
-              
+
               <Box sx={{ display: 'flex', gap: 2, mb: 1 }}>
                 <TextField
                   label="Display Name"
@@ -142,7 +148,7 @@ const Settings = () => {
                   size="small"
                   variant="outlined"
                 />
-                
+
                 <TextField
                   label="Color"
                   type="color"
@@ -154,14 +160,14 @@ const Settings = () => {
                   InputProps={{
                     startAdornment: (
                       <InputAdornment position="start">
-                        <Box 
-                          sx={{ 
-                            width: 16, 
-                            height: 16, 
-                            borderRadius: '50%', 
+                        <Box
+                          sx={{
+                            width: 16,
+                            height: 16,
+                            borderRadius: '50%',
                             bgcolor: sensor.color,
                             border: '1px solid rgba(0,0,0,0.1)'
-                          }} 
+                          }}
                         />
                       </InputAdornment>
                     ),
@@ -197,7 +203,7 @@ const Settings = () => {
         >
           Save Settings
         </Button>
-        
+
         <Button
           variant="outlined"
           onClick={handleReset}
@@ -234,8 +240,8 @@ const Settings = () => {
         onClose={() => setSnackbar({ ...snackbar, open: false })}
         anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
       >
-        <Alert 
-          onClose={() => setSnackbar({ ...snackbar, open: false })} 
+        <Alert
+          onClose={() => setSnackbar({ ...snackbar, open: false })}
           severity={snackbar.severity}
           sx={{ width: '100%' }}
         >

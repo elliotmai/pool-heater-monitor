@@ -9,10 +9,13 @@ const DEFAULT_SETTINGS = {
     lon: -97.5025
   },
   sensors: {
-    Blue: { displayName: 'Heater Input', color: '#007aff' },
-    Red: { displayName: 'Heater Output', color: '#ff3b30' },
-    Yellow: { displayName: 'Pool Return', color: '#ffcc00' },
-    Green: { displayName: 'Pool Supply', color: '#34c759' }
+    Blue: { displayName: 'Blue Sensor', color: '#007aff' },
+    Red: { displayName: 'Red Sensor', color: '#ff3b30' },
+    Yellow: { displayName: 'Yellow Sensor', color: '#ffcc00' },
+    Green: { displayName: 'Green Sensor', color: '#34c759' },
+    OriaCH1: { displayName: 'Oria Sensor 1', color: '#8e44ad' },
+    OriaCH2: { displayName: 'Oria Sensor 2', color: '#dca225' },
+    OriaCH3: { displayName: 'Oria Sensor 3', color: '#f9abdf' },
   }
 };
 

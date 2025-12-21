@@ -120,7 +120,7 @@ function App() {
               letterSpacing: '-0.4px'
             }}
           >
-            Pool Heater Monitor
+            House Weather Monitor
           </Typography>
           {/* <IconButton 
             onClick={refreshData}

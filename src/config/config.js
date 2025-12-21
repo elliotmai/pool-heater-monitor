@@ -9,23 +9,31 @@ export const CONFIG = {
 // Sensor display configuration
 export const SENSOR_CONFIG = {
   Blue: {
-    displayName: 'Heater Input',
-    icon: 'input',
+    displayName: 'Blue Sensor',
     color: '#007aff'
   },
   Red: {
-    displayName: 'Heater Output',
-    icon: 'output',
+    displayName: 'Red Sensor',
     color: '#ff3b30'
   },
   Yellow: {
-    displayName: 'Core Temp',
-    icon: 'circle',
+    displayName: 'Yellow Sensor',
     color: '#ffcc00'
   },
   Green: {
-    displayName: 'Sand Temp',
-    icon: 'terrain',
+    displayName: 'Green Sensor',
     color: '#34c759'
+  },
+  OriaCH1: {
+    displayName: 'Oria Sensor 1',
+    color: '#8e44ad'
+  },
+  OriaCH2: {
+    displayName: 'Oria Sensor 2',
+    color: '#dca225'
+  },
+  OriaCH3: {
+    displayName: 'Oria Sensor 3',
+    color: '#f9abdf'
   }
 };
