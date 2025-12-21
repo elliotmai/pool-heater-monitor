@@ -22,7 +22,7 @@ const Settings = () => {
       Green: { displayName: 'Green Sensor', color: '#34c759' },
       OriaCH1: { displayName: 'Oria Sensor 1', color: '#8e44ad' },
       OriaCH2: { displayName: 'Oria Sensor 2', color: '#dca225' },
-      OriaCH3: { displayName: 'Oria Sensor 3', color: '#f9abdf' },
+      OriaCH3: { displayName: 'Oria Sensor 3', color: '#bb5c9bff' },
     }
   });
 
@@ -136,7 +136,7 @@ const Settings = () => {
                   mb: 1.5
                 }}
               >
-                {sensor.displayName}
+                {key} Sensor
               </Typography>
 
               <Box sx={{ display: 'flex', gap: 2, mb: 1 }}>
