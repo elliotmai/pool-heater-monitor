@@ -1,4 +1,11 @@
-import { CONFIG } from '../config/config';
+import { 
+  ref, 
+  get, 
+  // query, 
+  // orderByChild, 
+  remove } from 'firebase/database';
+import { database } from '../config/firebase';
+// import { CONFIG } from '../config/config';
 import { transformSensorData } from './sensorMapping';
 
 /**
@@ -14,15 +21,20 @@ const celsiusToFahrenheit = (celsius) => {
  */
 export const fetchLatestData = async () => {
   try {
-    const [sensorsResponse, weatherResponse] = await Promise.all([
-      fetch(`${CONFIG.FIREBASE_URL}/latest.json`),
-      fetch(`${CONFIG.FIREBASE_URL}/weather_history.json`)
+    const latestRef = ref(database, 'latest');
+    const weatherHistoryRef = ref(database, 'weather_history');
+    
+    const [sensorsSnapshot, weatherSnapshot] = await Promise.all([
+      get(latestRef),
+      get(weatherHistoryRef)
     ]);
     
-    if (!sensorsResponse.ok) throw new Error('Failed to fetch latest data');
+    if (!sensorsSnapshot.exists()) {
+      throw new Error('Failed to fetch latest data');
+    }
     
-    const sensorsData = await sensorsResponse.json();
-    const weatherData = weatherResponse.ok ? await weatherResponse.json() : null;
+    const sensorsData = sensorsSnapshot.val();
+    const weatherData = weatherSnapshot.exists() ? weatherSnapshot.val() : null;
     
     const transformed = transformSensorData(sensorsData);
     
@@ -59,20 +71,25 @@ export const fetchLatestData = async () => {
 
 /**
  * Fetch historical sensor readings with merged weather data
- * Fetches 48 hours of data: the target date and the day before
- * @param {Date} targetDate - The date to fetch data for (defaults to today)
+ * Fetches all available data (no filtering by date)
+ * @param {Date} targetDate - Not used anymore, kept for API compatibility
  */
 export const fetchHistoricalData = async (targetDate = new Date()) => {
   try {
-    const [sensorsResponse, weatherResponse] = await Promise.all([
-      fetch(`${CONFIG.FIREBASE_URL}/readings.json`),
-      fetch(`${CONFIG.FIREBASE_URL}/weather_history.json`)
+    const readingsRef = ref(database, 'readings');
+    const weatherHistoryRef = ref(database, 'weather_history');
+    
+    const [sensorsSnapshot, weatherSnapshot] = await Promise.all([
+      get(readingsRef),
+      get(weatherHistoryRef)
     ]);
     
-    if (!sensorsResponse.ok) throw new Error('Failed to fetch historical data');
+    if (!sensorsSnapshot.exists()) {
+      throw new Error('Failed to fetch historical data');
+    }
     
-    const sensorsData = await sensorsResponse.json();
-    const weatherData = weatherResponse.ok ? await weatherResponse.json() : null;
+    const sensorsData = sensorsSnapshot.val();
+    const weatherData = weatherSnapshot.exists() ? weatherSnapshot.val() : null;
     
     // Create a map of weather data by timestamp
     const weatherMap = {};
@@ -83,24 +100,9 @@ export const fetchHistoricalData = async (targetDate = new Date()) => {
     }
     
     if (sensorsData) {
-      // Calculate the start of the day before target date and end of target date
-      const dayBefore = new Date(targetDate);
-      dayBefore.setDate(dayBefore.getDate() - 1);
-      dayBefore.setHours(0, 0, 0, 0);
-      
-      const endOfTargetDay = new Date(targetDate);
-      endOfTargetDay.setHours(23, 59, 59, 999);
-      
-      const startTimestamp = dayBefore.getTime();
-      const endTimestamp = endOfTargetDay.getTime();
-
-      // Filter readings for the 48-hour period and sort by unix_timestamp
+      // Load ALL readings and sort by unix_timestamp
       const readings = Object.values(sensorsData)
-        .filter(reading => {
-          if (!reading.unix_timestamp) return false;
-          const readingTime = reading.unix_timestamp * 1000;
-          return readingTime >= startTimestamp && readingTime <= endTimestamp;
-        })
+        .filter(reading => reading.unix_timestamp) // Only filter out readings without timestamp
         .sort((a, b) => (a.unix_timestamp || 0) - (b.unix_timestamp || 0))
         .map(reading => {
           const date = new Date(reading.timestamp);
@@ -157,11 +159,12 @@ export const fetchHistoricalData = async (targetDate = new Date()) => {
  */
 export const fetchLogs = async () => {
   try {
-    const response = await fetch(
-      `${CONFIG.FIREBASE_URL}/logs.json`
-    );
-    if (!response.ok) return [];
-    const data = await response.json();
+    const logsRef = ref(database, 'logs');
+    const snapshot = await get(logsRef);
+    
+    if (!snapshot.exists()) return [];
+    
+    const data = snapshot.val();
     
     if (data) {
       // Filter to last 7 days based on timestamp field
@@ -190,11 +193,12 @@ export const fetchLogs = async () => {
  */
 export const fetchWeatherHistory = async () => {
   try {
-    const response = await fetch(
-      `${CONFIG.FIREBASE_URL}/weather_history.json`
-    );
-    if (!response.ok) return [];
-    const data = await response.json();
+    const weatherHistoryRef = ref(database, 'weather_history');
+    const snapshot = await get(weatherHistoryRef);
+    
+    if (!snapshot.exists()) return [];
+    
+    const data = snapshot.val();
     
     if (data) {
       return Object.values(data)
@@ -213,15 +217,90 @@ export const fetchWeatherHistory = async () => {
 };
 
 /**
+ * Delete records older than 7 days from Firebase tables
+ * Uses Firebase SDK for proper database operations
+ */
+export const cleanupOldRecords = async () => {
+  const sevenDaysAgo = new Date();
+  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
+  const cutoffTimestamp = Math.floor(sevenDaysAgo.getTime() / 1000); // Convert to Unix timestamp
+
+  const tables = ['logs', 'readings', 'weather_history'];
+  const results = {
+    success: [],
+    errors: []
+  };
+
+  for (const table of tables) {
+    try {
+      const tableRef = ref(database, table);
+      const snapshot = await get(tableRef);
+      
+      if (!snapshot.exists()) {
+        results.success.push({ table, deletedCount: 0 });
+        continue;
+      }
+
+      const data = snapshot.val();
+      
+      // Find records to delete
+      const keysToDelete = [];
+      Object.entries(data).forEach(([key, record]) => {
+        let recordTimestamp;
+        
+        // Handle different timestamp formats
+        if (record.unix_timestamp) {
+          recordTimestamp = record.unix_timestamp;
+        } else if (record.timestamp) {
+          recordTimestamp = Math.floor(new Date(record.timestamp).getTime() / 1000);
+        } else {
+          return; // Skip records without timestamp
+        }
+
+        if (recordTimestamp < cutoffTimestamp) {
+          keysToDelete.push(key);
+        }
+      });
+
+      // Delete old records using Firebase SDK
+      let deletedCount = 0;
+      for (const key of keysToDelete) {
+        const recordRef = ref(database, `${table}/${key}`);
+        await remove(recordRef);
+        deletedCount++;
+      }
+
+      results.success.push({ 
+        table, 
+        deletedCount,
+        totalRecords: Object.keys(data).length 
+      });
+
+    } catch (error) {
+      results.errors.push({ 
+        table, 
+        error: error.message 
+      });
+    }
+  }
+
+  return results;
+};
+
+/**
  * Fetch all data in parallel
  */
 export const fetchAllData = async (targetDate) => {
+
   const [latest, historical, weatherHistory, logs] = await Promise.all([
     fetchLatestData(),
     fetchHistoricalData(targetDate),
     fetchWeatherHistory(),
     fetchLogs()
   ]);
+
+  cleanupOldRecords();
+  // console.log('Cleanup results:', deletedRecords);
 
   return { latest, historical, weatherHistory, logs };
 };

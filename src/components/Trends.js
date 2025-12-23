@@ -7,7 +7,8 @@ import { getSensorConfig } from '../config/settingsUtils';
 const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
   const [chartView, setChartView] = useState('all');
   const [timeFilter, setTimeFilter] = useState('24h');
-  const [viewDate, setViewDate] = useState(new Date());
+  // Store the end time of the current view window
+  const [viewEndTime, setViewEndTime] = useState(() => new Date());
 
   // Get sensor config from settings
   const SENSOR_CONFIG = getSensorConfig();
@@ -21,6 +22,8 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
   const handleTimeFilterChange = (event, newFilter) => {
     if (newFilter !== null) {
       setTimeFilter(newFilter);
+      // Reset to current time when changing filter
+      setViewEndTime(new Date());
     }
   };
 
@@ -37,30 +40,11 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
 
   // Calculate the time range being displayed
   const displayTimeRange = useMemo(() => {
-    const now = new Date();
-    const isToday = viewDate.toDateString() === now.toDateString();
-    
-    let endTime, startTime;
-    
-    if (isToday && hoursToShow < 24) {
-      // For current day with less than 24h view, show from (now - hours) to now
-      endTime = now;
-      startTime = new Date(now.getTime() - (hoursToShow * 60 * 60 * 1000));
-    } else {
-      // For full day or past days, show the entire day
-      startTime = new Date(viewDate);
-      startTime.setHours(0, 0, 0, 0);
-      
-      if (hoursToShow === 24) {
-        endTime = new Date(viewDate);
-        endTime.setHours(23, 59, 59, 999);
-      } else {
-        endTime = new Date(startTime.getTime() + (hoursToShow * 60 * 60 * 1000));
-      }
-    }
+    const endTime = new Date(viewEndTime);
+    const startTime = new Date(endTime.getTime() - (hoursToShow * 60 * 60 * 1000));
     
     return { startTime, endTime };
-  }, [viewDate, hoursToShow]);
+  }, [viewEndTime, hoursToShow]);
 
   // Filter data based on time range
   const filteredHistorical = useMemo(() => {
@@ -78,42 +62,41 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
     });
   }, [historical, displayTimeRange]);
 
-  // Navigate to previous day
-  const goToPreviousDay = () => {
-    const newDate = new Date(viewDate);
-    newDate.setDate(newDate.getDate() - 1);
-    setViewDate(newDate);
-    onDateChange(newDate);
+  // Navigate backward by the hoursToShow amount
+  const goBackward = () => {
+    const newEndTime = new Date(viewEndTime.getTime() - (hoursToShow * 60 * 60 * 1000));
+    setViewEndTime(newEndTime);
   };
 
-  // Navigate to next day
-  const goToNextDay = () => {
-    const newDate = new Date(viewDate);
-    newDate.setDate(newDate.getDate() + 1);
-    setViewDate(newDate);
-    onDateChange(newDate);
+  // Navigate forward by the hoursToShow amount
+  const goForward = () => {
+    const newEndTime = new Date(viewEndTime.getTime() + (hoursToShow * 60 * 60 * 1000));
+    // Don't go beyond current time
+    const now = new Date();
+    if (newEndTime > now) {
+      setViewEndTime(now);
+    } else {
+      setViewEndTime(newEndTime);
+    }
   };
 
-  // Navigate to today
-  const goToToday = () => {
-    const today = new Date();
-    setViewDate(today);
-    onDateChange(today);
+  // Navigate to current time
+  const goToNow = () => {
+    setViewEndTime(new Date());
   };
 
-  // Check if we can go forward (not already at today)
+  // Check if we can go forward (not already at current time)
   const canGoForward = useMemo(() => {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const view = new Date(viewDate);
-    view.setHours(0, 0, 0, 0);
-    return view < today;
-  }, [viewDate]);
+    const now = new Date();
+    // Allow forward if we're more than 1 minute behind current time
+    return viewEndTime.getTime() < (now.getTime() - 60000);
+  }, [viewEndTime]);
 
-  const isToday = useMemo(() => {
-    const today = new Date();
-    return viewDate.toDateString() === today.toDateString();
-  }, [viewDate]);
+  const isAtCurrentTime = useMemo(() => {
+    const now = new Date();
+    // Consider "at current time" if within 1 minute
+    return Math.abs(now.getTime() - viewEndTime.getTime()) < 60000;
+  }, [viewEndTime]);
 
   // Calculate temperature differentials and merge with weather history
   const dataWithDifferentials = useMemo(() => {
@@ -153,17 +136,6 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
       };
     });
     
-    // // Debug logging
-    // if (result.length > 0) {
-    //   console.log('Sample data with weather:', {
-    //     time: result[0].time,
-    //     outdoor_temp: result[0].outdoor_temp,
-    //     avg_temp: result[0].avg_temp,
-    //     weather_description: result[0].weather_description
-    //   });
-    //   console.log('Weather history available:', weatherHistory?.length || 0);
-    // }
-    
     return result;
   }, [filteredHistorical, weatherHistory]);
 
@@ -172,7 +144,6 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
     const hasData = dataWithDifferentials.some(reading => 
       reading.outdoor_temp !== null && reading.outdoor_temp !== undefined
     );
-    // console.log('Has outdoor data:', hasData, 'Total readings:', dataWithDifferentials.length);
     return hasData;
   }, [dataWithDifferentials]);
 
@@ -215,31 +186,22 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
   const formatTimeRange = () => {
     const { startTime, endTime } = displayTimeRange;
     
-    if (hoursToShow === 24) {
-      return viewDate.toLocaleDateString('en-US', { 
-        weekday: 'short',
-        month: 'short', 
-        day: 'numeric',
-        year: 'numeric'
-      });
+    const formatTime = (date) => date.toLocaleTimeString('en-US', { 
+      hour: 'numeric', 
+      minute: '2-digit',
+      hour12: true
+    });
+    
+    const formatDate = (date) => date.toLocaleDateString('en-US', { 
+      month: 'short', 
+      day: 'numeric'
+    });
+    
+    // If times span different days
+    if (startTime.toDateString() !== endTime.toDateString()) {
+      return `${formatDate(startTime)} ${formatTime(startTime)} - ${formatDate(endTime)} ${formatTime(endTime)}`;
     } else {
-      const formatTime = (date) => date.toLocaleTimeString('en-US', { 
-        hour: 'numeric', 
-        minute: '2-digit',
-        hour12: true
-      });
-      
-      const formatDate = (date) => date.toLocaleDateString('en-US', { 
-        month: 'short', 
-        day: 'numeric'
-      });
-      
-      // If times span different days
-      if (startTime.toDateString() !== endTime.toDateString()) {
-        return `${formatDate(startTime)} ${formatTime(startTime)} - ${formatDate(endTime)} ${formatTime(endTime)}`;
-      } else {
-        return `${formatDate(startTime)}, ${formatTime(startTime)} - ${formatTime(endTime)}`;
-      }
+      return `${formatDate(startTime)}, ${formatTime(startTime)} - ${formatTime(endTime)}`;
     }
   };
 
@@ -309,7 +271,7 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
         {/* Time Navigation */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
           <IconButton 
-            onClick={goToPreviousDay}
+            onClick={goBackward}
             size="small"
             sx={{ 
               color: '#007aff',
@@ -330,10 +292,10 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
             >
               {formatTimeRange()}
             </Typography>
-            {!isToday && (
+            {!isAtCurrentTime && (
               <Typography
                 variant="caption"
-                onClick={goToToday}
+                onClick={goToNow}
                 sx={{
                   fontSize: '10px',
                   color: '#007aff',
@@ -344,12 +306,12 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
                   }
                 }}
               >
-                Jump to today
+                Jump to now
               </Typography>
             )}
           </Box>
           <IconButton 
-            onClick={goToNextDay}
+            onClick={goForward}
             disabled={!canGoForward}
             size="small"
             sx={{ 

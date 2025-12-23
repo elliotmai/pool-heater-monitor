@@ -11,14 +11,12 @@ import {
   Alert
 } from '@mui/material';
 import { 
-  // Refresh, 
-  Home, 
+  Home,
   ShowChart, 
   ListAlt,
-  Water,
   Settings as SettingsIcon,
 } from '@mui/icons-material';
-import LocalFireDepartmentIcon from '@mui/icons-material/LocalFireDepartment';
+import ThermostatIcon from '@mui/icons-material/Thermostat';
 import Overview from './components/Overview';
 import Trends from './components/Trends';
 import Logs from './components/Logs';
@@ -44,6 +42,7 @@ function App() {
       const newData = await fetchAllData(targetDate);
       setData(newData);
       setLoading(false);
+      
     } catch (err) {
       setError('Failed to load data. Please try again.');
       setLoading(false);
@@ -108,8 +107,7 @@ function App() {
         }}
       >
         <Toolbar sx={{ minHeight: '44px !important', py: 0 }}>
-          <Water sx={{ mr: 1, fontSize: 20 }} />
-          <LocalFireDepartmentIcon  sx={{ mr: 1, fontSize: 20 }} />
+          <ThermostatIcon sx={{ mr: 1, fontSize: 20 }} />
           <Typography 
             variant="h6" 
             component="div" 
