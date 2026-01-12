@@ -1,0 +1,10 @@
+<svg width="64" height="64" viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <!-- Simple Thermometer Icon -->
+  <rect x="26" y="12" width="12" height="32" rx="6" fill="#007AFF" fill-opacity="0.15"/>
+  <rect x="28" y="28" width="8" height="16" fill="#007AFF"/>
+  <circle cx="32" cy="48" r="8" fill="#007AFF"/>
+  <circle cx="32" cy="48" r="5" fill="#FF3B30"/>
+  
+  <!-- Temperature indicator dot -->
+  <circle cx="32" cy="8" r="2.5" fill="#34C759"/>
+</svg>

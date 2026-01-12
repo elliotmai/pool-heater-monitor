@@ -1,0 +1,37 @@
+<svg width="120" height="120" viewBox="0 0 120 120" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Gradient Definitions -->
+    <linearGradient id="tempGradient" x1="60" y1="30" x2="60" y2="90" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#34C759"/>
+      <stop offset="50%" stop-color="#FFCC00"/>
+      <stop offset="100%" stop-color="#FF3B30"/>
+    </linearGradient>
+    
+    <linearGradient id="bgGradient" x1="0" y1="0" x2="120" y2="120" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#007AFF" stop-opacity="0.1"/>
+      <stop offset="100%" stop-color="#007AFF" stop-opacity="0.05"/>
+    </linearGradient>
+  </defs>
+  
+  <!-- Background -->
+  <rect width="120" height="120" rx="24" fill="url(#bgGradient)"/>
+  
+  <!-- Rounded Square Container -->
+  <rect x="30" y="30" width="60" height="60" rx="16" fill="white" fill-opacity="0.9"/>
+  
+  <!-- Thermometer Design -->
+  <g>
+    <!-- Outer tube -->
+    <rect x="54" y="42" width="12" height="36" rx="6" fill="#E5E5EA"/>
+    
+    <!-- Temperature gradient fill -->
+    <rect x="55.5" y="58" width="9" height="21" fill="url(#tempGradient)"/>
+    
+    <!-- Bulb -->
+    <circle cx="60" cy="82" r="9" fill="url(#tempGradient)"/>
+    <circle cx="60" cy="82" r="6" fill="#FF3B30"/>
+  </g>
+  
+  <!-- Minimal degree symbol -->
+  <circle cx="75" cy="45" r="2.5" stroke="#007AFF" stroke-width="1.5" fill="none"/>
+</svg>
