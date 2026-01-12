@@ -112,38 +112,60 @@ const Overview = ({ latest, weather }) => {
   // Use weather from latest data
   const weatherData = latest?.weather;
   
+  // Filter to only show alive sensors (enabled = alive from Firebase)
+  const aliveSensors = Object.entries(SENSOR_CONFIG).filter(
+    ([_, config]) => config.enabled !== false
+  );
+  
   return (
     <Box sx={{ p: 2, maxWidth: '800px', mx: 'auto' }}>
       {/* Temperature Sensors */}
-      <Card sx={{ mb: 1.5, boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)' }}>
-        <CardContent>
-          <Typography 
-            variant="overline" 
-            sx={{ 
-              fontSize: '13px',
-              fontWeight: 600,
-              color: '#8e8e93',
-              letterSpacing: '0.5px',
-              mb: 1.5,
-              display: 'block',
-              textAlign: 'center'
-            }}
-          >
-            Temperature Sensors
-          </Typography>
-          <Grid container spacing={0} justifyContent={"center"} justifyItems={"center"}>
-            {Object.entries(SENSOR_CONFIG).map(([sensorName, config]) => (
-              <Grid item xs={12} sm={12} m={2} key={sensorName}>
-                <SensorCard 
-                  name={sensorName}
-                  value={latest?.[sensorName]}
-                  config={config}
-                />
-              </Grid>
-            ))}
-          </Grid>
-        </CardContent>
-      </Card>
+      {aliveSensors.length > 0 ? (
+        <Card sx={{ mb: 1.5, boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)' }}>
+          <CardContent>
+            <Typography 
+              variant="overline" 
+              sx={{ 
+                fontSize: '13px',
+                fontWeight: 600,
+                color: '#8e8e93',
+                letterSpacing: '0.5px',
+                mb: 1.5,
+                display: 'block',
+                textAlign: 'center'
+              }}
+            >
+              Temperature Sensors
+            </Typography>
+            <Grid container spacing={0} justifyContent={"center"} justifyItems={"center"}>
+              {aliveSensors.map(([sensorName, config]) => (
+                <Grid item xs={12} sm={12} m={2} key={sensorName}>
+                  <SensorCard 
+                    name={sensorName}
+                    value={latest?.[sensorName]}
+                    config={config}
+                  />
+                </Grid>
+              ))}
+            </Grid>
+          </CardContent>
+        </Card>
+      ) : (
+        <Card sx={{ mb: 1.5, boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)' }}>
+          <CardContent>
+            <Typography 
+              variant="body2" 
+              sx={{ 
+                textAlign: 'center',
+                color: '#8e8e93',
+                py: 2
+              }}
+            >
+              No active sensors. Enable sensors in Settings or add them to Firebase.
+            </Typography>
+          </CardContent>
+        </Card>
+      )}
 
       {/* Weather Information */}
       {weatherData && (

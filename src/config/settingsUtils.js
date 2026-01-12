@@ -1,64 +1,47 @@
 /**
- * Default settings
+ * Settings utilities for working with Firebase-based sensor configuration
+ * Sensor config is now stored in Firebase at /water-heater-user/sensors
+ * This file provides helper functions for accessing the config
  */
-const DEFAULT_SETTINGS = {
-  location: {
-    name: 'Rhome',
-    region: 'Texas',
-    lat: 33.0258,
-    lon: -97.5025
-  },
-  sensors: {
-    Blue: { displayName: 'Blue Sensor', color: '#007aff' },
-    Red: { displayName: 'Red Sensor', color: '#ff3b30' },
-    Yellow: { displayName: 'Yellow Sensor', color: '#ffcc00' },
-    Green: { displayName: 'Green Sensor', color: '#34c759' },
-    OriaCH1: { displayName: 'Oria Sensor 1', color: '#8e44ad' },
-    OriaCH2: { displayName: 'Oria Sensor 2', color: '#dca225' },
-    OriaCH3: { displayName: 'Oria Sensor 3', color: '#f9abdf' },
-  }
+
+// Global variable to cache sensor config fetched from Firebase
+let cachedSensorConfig = null;
+
+/**
+ * Set the sensor configuration (called by App.js after fetching from Firebase)
+ */
+export const setSensorConfig = (config) => {
+  cachedSensorConfig = config;
 };
 
 /**
- * Get settings from localStorage or return defaults
- */
-export const getSettings = () => {
-  try {
-    const saved = localStorage.getItem('poolHeaterSettings');
-    if (saved) {
-      return JSON.parse(saved);
-    }
-  } catch (error) {
-    console.error('Error loading settings:', error);
-  }
-  return DEFAULT_SETTINGS;
-};
-
-/**
- * Get location settings
- */
-export const getLocation = () => {
-  const settings = getSettings();
-  return settings.location;
-};
-
-/**
- * Get sensor configuration
+ * Get the current sensor configuration
  */
 export const getSensorConfig = () => {
-  const settings = getSettings();
-  return settings.sensors;
+  return cachedSensorConfig || {};
 };
 
 /**
- * Save settings to localStorage
+ * Get all sensor keys that have been discovered
  */
-export const saveSettings = (settings) => {
-  try {
-    localStorage.setItem('poolHeaterSettings', JSON.stringify(settings));
-    return true;
-  } catch (error) {
-    console.error('Error saving settings:', error);
-    return false;
-  }
+export const getDiscoveredSensors = () => {
+  return Object.keys(cachedSensorConfig || {});
+};
+
+/**
+ * Check if a sensor is enabled
+ */
+export const isSensorEnabled = (sensorKey) => {
+  const config = cachedSensorConfig?.[sensorKey];
+  return config?.enabled !== false; // Default to true
+};
+
+/**
+ * Get enabled sensors only
+ */
+export const getEnabledSensors = () => {
+  const config = cachedSensorConfig || {};
+  return Object.fromEntries(
+    Object.entries(config).filter(([_, sensorConfig]) => sensorConfig.enabled !== false)
+  );
 };

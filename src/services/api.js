@@ -1,12 +1,10 @@
 import { 
   ref, 
-  get, 
-  // query, 
-  // orderByChild, 
+  get,
+  set,
+  update,
   remove } from 'firebase/database';
 import { database } from '../config/firebase';
-// import { CONFIG } from '../config/config';
-import { transformSensorData } from './sensorMapping';
 
 /**
  * Convert Celsius to Fahrenheit
@@ -17,12 +15,130 @@ const celsiusToFahrenheit = (celsius) => {
 };
 
 /**
+ * Fetch sensor configuration from Firebase
+ * This is the source of truth for sensor metadata
+ */
+export const fetchSensorConfig = async () => {
+  try {
+    const sensorsRef = ref(database, 'water-heater-user/sensors');
+    const snapshot = await get(sensorsRef);
+    
+    if (!snapshot.exists()) {
+      return {};
+    }
+    
+    const sensorsData = snapshot.val();
+    
+    // Transform to the format expected by the app
+    const sensorConfig = {};
+    Object.entries(sensorsData).forEach(([sensorId, config]) => {
+      sensorConfig[sensorId] = {
+        displayName: config.displayName || sensorId,
+        color: config.color || '#007aff',
+        enabled: config.alive !== false // Use 'alive' from DB as 'enabled' in app
+      };
+    });
+    
+    return sensorConfig;
+  } catch (error) {
+    console.error('Error fetching sensor config:', error);
+    return {};
+  }
+};
+
+/**
+ * Update a sensor's configuration in Firebase
+ */
+export const updateSensorConfig = async (sensorId, config) => {
+  try {
+    const sensorRef = ref(database, `water-heater-user/sensors/${sensorId}`);
+    
+    // Map app's 'enabled' to DB's 'alive'
+    const dbConfig = {
+      displayName: config.displayName,
+      color: config.color,
+      alive: config.enabled !== false
+    };
+    
+    await update(sensorRef, dbConfig);
+    return true;
+  } catch (error) {
+    console.error('Error updating sensor config:', error);
+    return false;
+  }
+};
+
+/**
+ * Create a new sensor configuration in Firebase
+ */
+export const createSensorConfig = async (sensorId, config) => {
+  try {
+    const sensorRef = ref(database, `water-heater-user/sensors/${sensorId}`);
+    
+    const dbConfig = {
+      displayName: config.displayName || sensorId,
+      color: config.color || '#007aff',
+      alive: config.enabled !== false
+    };
+    
+    await set(sensorRef, dbConfig);
+    return true;
+  } catch (error) {
+    console.error('Error creating sensor config:', error);
+    return false;
+  }
+};
+
+/**
+ * Discover sensors from Firebase data and ensure they exist in sensor config
+ * Auto-creates sensor config entries for any new sensors found in readings
+ */
+const discoverAndEnsureSensors = async (firebaseData, currentSensorConfig) => {
+  if (!firebaseData) return currentSensorConfig;
+
+  const excludedKeys = ['timestamp', 'unix_timestamp', 'weather'];
+  const sensorKeys = Object.keys(firebaseData).filter(
+    key => !excludedKeys.includes(key) && typeof firebaseData[key] === 'number'
+  );
+
+  const DEFAULT_COLORS = [
+    '#007aff', '#ff3b30', '#ffcc00', '#34c759', '#8e44ad',
+    '#dca225', '#f9abdf', '#00d4ff', '#ff6b6b', '#4ecdc4'
+  ];
+
+  let hasNewSensors = false;
+  const newSensorConfig = { ...currentSensorConfig };
+  let colorIndex = Object.keys(currentSensorConfig).length;
+
+  // Check for sensors that don't have config entries
+  for (const sensorKey of sensorKeys) {
+    if (!currentSensorConfig[sensorKey]) {
+      hasNewSensors = true;
+      const config = {
+        displayName: sensorKey.replace(/([A-Z])/g, ' $1').trim(),
+        color: DEFAULT_COLORS[colorIndex % DEFAULT_COLORS.length],
+        enabled: true
+      };
+      
+      newSensorConfig[sensorKey] = config;
+      
+      // Create the sensor config in Firebase
+      await createSensorConfig(sensorKey, config);
+      
+      colorIndex++;
+    }
+  }
+
+  return hasNewSensors ? newSensorConfig : currentSensorConfig;
+};
+
+/**
  * Fetch the latest sensor readings from Firebase
  */
 export const fetchLatestData = async () => {
   try {
-    const latestRef = ref(database, 'latest');
-    const weatherHistoryRef = ref(database, 'weather_history');
+    const latestRef = ref(database, 'water-heater-user/latest');
+    const weatherHistoryRef = ref(database, 'water-heater-user/weather_history');
     
     const [sensorsSnapshot, weatherSnapshot] = await Promise.all([
       get(latestRef),
@@ -36,8 +152,6 @@ export const fetchLatestData = async () => {
     const sensorsData = sensorsSnapshot.val();
     const weatherData = weatherSnapshot.exists() ? weatherSnapshot.val() : null;
     
-    const transformed = transformSensorData(sensorsData);
-    
     // Get the latest weather reading
     let latestWeather = null;
     if (weatherData) {
@@ -49,20 +163,19 @@ export const fetchLatestData = async () => {
     }
     
     // Convert all temperatures to Fahrenheit
-    if (transformed) {
-      const converted = { ...transformed };
-      
-      // Convert each numeric property (temperature sensors) to Fahrenheit
-      Object.keys(converted).forEach(key => {
-        if (typeof converted[key] === 'number') {
-          converted[key] = celsiusToFahrenheit(converted[key]);
-        }
-      });
-      
-      converted.weather = latestWeather;
-      return converted;
-    }
-    return null;
+    const converted = {
+      timestamp: sensorsData.timestamp,
+      unix_timestamp: sensorsData.unix_timestamp,
+    };
+    
+    Object.keys(sensorsData).forEach(key => {
+      if (typeof sensorsData[key] === 'number' && key !== 'unix_timestamp') {
+        converted[key] = celsiusToFahrenheit(sensorsData[key]);
+      }
+    });
+    
+    converted.weather = latestWeather;
+    return converted;
   } catch (error) {
     console.error('Error fetching latest data:', error);
     throw error;
@@ -71,13 +184,11 @@ export const fetchLatestData = async () => {
 
 /**
  * Fetch historical sensor readings with merged weather data
- * Fetches all available data (no filtering by date)
- * @param {Date} targetDate - Not used anymore, kept for API compatibility
  */
 export const fetchHistoricalData = async (targetDate = new Date()) => {
   try {
-    const readingsRef = ref(database, 'readings');
-    const weatherHistoryRef = ref(database, 'weather_history');
+    const readingsRef = ref(database, 'water-heater-user/readings');
+    const weatherHistoryRef = ref(database, 'water-heater-user/weather_history');
     
     const [sensorsSnapshot, weatherSnapshot] = await Promise.all([
       get(readingsRef),
@@ -102,7 +213,7 @@ export const fetchHistoricalData = async (targetDate = new Date()) => {
     if (sensorsData) {
       // Load ALL readings and sort by unix_timestamp
       const readings = Object.values(sensorsData)
-        .filter(reading => reading.unix_timestamp) // Only filter out readings without timestamp
+        .filter(reading => reading.unix_timestamp)
         .sort((a, b) => (a.unix_timestamp || 0) - (b.unix_timestamp || 0))
         .map(reading => {
           const date = new Date(reading.timestamp);
@@ -114,15 +225,15 @@ export const fetchHistoricalData = async (targetDate = new Date()) => {
           // Find matching weather data (within 5 minutes)
           let matchingWeather = weatherMap[reading.unix_timestamp];
           if (!matchingWeather) {
-            // Try to find weather within 5 minutes
             const timestamps = Object.keys(weatherMap).map(Number);
             const closest = timestamps.find(t => 
-              Math.abs(t - reading.unix_timestamp) <= 300 // 5 minutes
+              Math.abs(t - reading.unix_timestamp) <= 300
             );
             if (closest) {
               matchingWeather = weatherMap[closest];
             }
           }
+          
           // Build base result object
           const result = {
             time,
@@ -159,7 +270,7 @@ export const fetchHistoricalData = async (targetDate = new Date()) => {
  */
 export const fetchLogs = async () => {
   try {
-    const logsRef = ref(database, 'logs');
+    const logsRef = ref(database, 'water-heater-user/logs');
     const snapshot = await get(logsRef);
     
     if (!snapshot.exists()) return [];
@@ -193,7 +304,7 @@ export const fetchLogs = async () => {
  */
 export const fetchWeatherHistory = async () => {
   try {
-    const weatherHistoryRef = ref(database, 'weather_history');
+    const weatherHistoryRef = ref(database, 'water-heater-user/weather_history');
     const snapshot = await get(weatherHistoryRef);
     
     if (!snapshot.exists()) return [];
@@ -203,7 +314,7 @@ export const fetchWeatherHistory = async () => {
     if (data) {
       return Object.values(data)
         .sort((a, b) => a.unix_timestamp - b.unix_timestamp)
-        .slice(-100) // Take last 100 weather records
+        .slice(-100)
         .map(weather => ({
           ...weather,
           timestamp: weather.timestamp || new Date(weather.unix_timestamp * 1000).toISOString()
@@ -218,12 +329,11 @@ export const fetchWeatherHistory = async () => {
 
 /**
  * Delete records older than 7 days from Firebase tables
- * Uses Firebase SDK for proper database operations
  */
 export const cleanupOldRecords = async () => {
   const sevenDaysAgo = new Date();
   sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-  const cutoffTimestamp = Math.floor(sevenDaysAgo.getTime() / 1000); // Convert to Unix timestamp
+  const cutoffTimestamp = Math.floor(sevenDaysAgo.getTime() / 1000);
 
   const tables = ['logs', 'readings', 'weather_history'];
   const results = {
@@ -233,7 +343,7 @@ export const cleanupOldRecords = async () => {
 
   for (const table of tables) {
     try {
-      const tableRef = ref(database, table);
+      const tableRef = ref(database, `water-heater-user/${table}`);
       const snapshot = await get(tableRef);
       
       if (!snapshot.exists()) {
@@ -248,13 +358,12 @@ export const cleanupOldRecords = async () => {
       Object.entries(data).forEach(([key, record]) => {
         let recordTimestamp;
         
-        // Handle different timestamp formats
         if (record.unix_timestamp) {
           recordTimestamp = record.unix_timestamp;
         } else if (record.timestamp) {
           recordTimestamp = Math.floor(new Date(record.timestamp).getTime() / 1000);
         } else {
-          return; // Skip records without timestamp
+          return;
         }
 
         if (recordTimestamp < cutoffTimestamp) {
@@ -262,10 +371,10 @@ export const cleanupOldRecords = async () => {
         }
       });
 
-      // Delete old records using Firebase SDK
+      // Delete old records
       let deletedCount = 0;
       for (const key of keysToDelete) {
-        const recordRef = ref(database, `${table}/${key}`);
+        const recordRef = ref(database, `water-heater-user/${table}/${key}`);
         await remove(recordRef);
         deletedCount++;
       }
@@ -288,9 +397,11 @@ export const cleanupOldRecords = async () => {
 };
 
 /**
- * Fetch all data in parallel
+ * Fetch all data in parallel, including sensor configuration
  */
 export const fetchAllData = async (targetDate) => {
+  // First, fetch sensor configuration from Firebase
+  const sensorConfig = await fetchSensorConfig();
 
   const [latest, historical, weatherHistory, logs] = await Promise.all([
     fetchLatestData(),
@@ -299,8 +410,16 @@ export const fetchAllData = async (targetDate) => {
     fetchLogs()
   ]);
 
-  cleanupOldRecords();
-  // console.log('Cleanup results:', deletedRecords);
+  // Auto-discover any new sensors and create their config
+  const updatedSensorConfig = await discoverAndEnsureSensors(latest, sensorConfig);
 
-  return { latest, historical, weatherHistory, logs };
+  cleanupOldRecords();
+
+  return { 
+    latest, 
+    historical, 
+    weatherHistory, 
+    logs,
+    sensorConfig: updatedSensorConfig 
+  };
 };

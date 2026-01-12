@@ -10,8 +10,11 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
   // Store the end time of the current view window
   const [viewEndTime, setViewEndTime] = useState(() => new Date());
 
-  // Get sensor config from settings
+  // Get sensor config from settings and filter to alive sensors only
   const SENSOR_CONFIG = getSensorConfig();
+  const aliveSensors = Object.fromEntries(
+    Object.entries(SENSOR_CONFIG).filter(([_, config]) => config.enabled !== false)
+  );
 
   const handleViewChange = (event, newView) => {
     if (newView !== null) {
@@ -155,9 +158,9 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
 
     const allTemps = [];
     
-    // Collect all temperature values from all sensors
+    // Collect all temperature values from alive sensors only
     filteredHistorical.forEach(reading => {
-      Object.keys(SENSOR_CONFIG).forEach(sensorName => {
+      Object.keys(aliveSensors).forEach(sensorName => {
         const temp = reading[sensorName];
         if (temp !== null && temp !== undefined && typeof temp === 'number') {
           allTemps.push(temp);
@@ -179,7 +182,7 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
 
     // Add ±5°F padding
     return [Math.floor(minTemp - 2), Math.ceil(maxTemp + 2)];
-  }, [filteredHistorical, SENSOR_CONFIG]);
+  }, [filteredHistorical, aliveSensors]);
 
 
   // Format time range for display
@@ -407,7 +410,7 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
                       formatter={(value) => (value != null && typeof value === 'number') ? [`${value.toFixed(1)}°F`] : ['N/A']}
                     />
                     <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
-                    {Object.entries(SENSOR_CONFIG).map(([sensorName, config]) => (
+                    {Object.entries(aliveSensors).map(([sensorName, config]) => (
                       <Line
                         key={sensorName}
                         type="monotone"
@@ -506,18 +509,18 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
                       <Line
                         type="monotone"
                         dataKey="Blue"
-                        stroke={SENSOR_CONFIG.Blue.color}
+                        stroke={aliveSensors.Blue?.color || SENSOR_CONFIG.Blue?.color || '#007aff'}
                         strokeWidth={2}
-                        name={SENSOR_CONFIG.Blue.displayName}
+                        name={aliveSensors.Blue?.displayName || SENSOR_CONFIG.Blue?.displayName || 'Blue'}
                         dot={false}
                         activeDot={{ r: 5 }}
                       />
                       <Line
                         type="monotone"
                         dataKey="Red"
-                        stroke={SENSOR_CONFIG.Red.color}
+                        stroke={aliveSensors.Red?.color || SENSOR_CONFIG.Red?.color || '#ff3b30'}
                         strokeWidth={2}
-                        name={SENSOR_CONFIG.Red.displayName}
+                        name={aliveSensors.Red?.displayName || SENSOR_CONFIG.Red?.displayName || 'Red'}
                         dot={false}
                         activeDot={{ r: 5 }}
                       />
@@ -776,7 +779,7 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
                         }}
                       />
                       <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
-                      {Object.entries(SENSOR_CONFIG).map(([sensorName, config]) => (
+                      {Object.entries(aliveSensors).map(([sensorName, config]) => (
                         <Area
                           key={sensorName}
                           type="monotone"

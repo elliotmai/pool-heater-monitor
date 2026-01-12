@@ -4,7 +4,6 @@ import {
   AppBar, 
   Toolbar, 
   Typography, 
-  // IconButton, 
   BottomNavigation,
   BottomNavigationAction,
   CircularProgress,
@@ -22,6 +21,7 @@ import Trends from './components/Trends';
 import Logs from './components/Logs';
 import Settings from './components/Settings';
 import { fetchAllData } from './services/api';
+import { setSensorConfig } from './config/settingsUtils';
 import { CONFIG } from './config/config';
 import './App.css';
 
@@ -31,7 +31,8 @@ function App() {
     latest: null,
     historical: [],
     weatherHistory: [],
-    logs: []
+    logs: [],
+    sensorConfig: {}
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -41,6 +42,10 @@ function App() {
       setError(null);
       const newData = await fetchAllData(targetDate);
       setData(newData);
+      
+      // Update the global sensor config cache
+      setSensorConfig(newData.sensorConfig);
+      
       setLoading(false);
       
     } catch (err) {
@@ -72,7 +77,7 @@ function App() {
       case 2:
         return <Logs logs={data.logs} />;
       case 3:
-        return <Settings />;
+        return <Settings sensorConfig={data.sensorConfig} onRefresh={refreshData} />;
       default:
         return null;
     }
@@ -120,12 +125,6 @@ function App() {
           >
             House Weather Monitor
           </Typography>
-          {/* <IconButton 
-            onClick={refreshData}
-            sx={{ color: '#007aff' }}
-          >
-            <Refresh />
-          </IconButton> */}
         </Toolbar>
       </AppBar>
 
