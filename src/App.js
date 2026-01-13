@@ -1,21 +1,20 @@
 import React, { useState, useEffect } from 'react';
-import { 
-  Box, 
-  AppBar, 
-  Toolbar, 
-  Typography, 
+import {
+  Box,
+  AppBar,
+  Toolbar,
+  Typography,
   BottomNavigation,
   BottomNavigationAction,
   CircularProgress,
   Alert
 } from '@mui/material';
-import { 
+import {
   Home,
-  ShowChart, 
+  ShowChart,
   ListAlt,
   Settings as SettingsIcon,
 } from '@mui/icons-material';
-import ThermostatIcon from '@mui/icons-material/Thermostat';
 import Overview from './components/Overview';
 import Trends from './components/Trends';
 import Logs from './components/Logs';
@@ -23,6 +22,7 @@ import Settings from './components/Settings';
 import { fetchAllData } from './services/api';
 import { setSensorConfig } from './config/settingsUtils';
 import { CONFIG } from './config/config';
+import logo from './temperature-monitor-logo.png';
 import './App.css';
 
 function App() {
@@ -42,12 +42,12 @@ function App() {
       setError(null);
       const newData = await fetchAllData(targetDate);
       setData(newData);
-      
+
       // Update the global sensor config cache
       setSensorConfig(newData.sensorConfig);
-      
+
       setLoading(false);
-      
+
     } catch (err) {
       setError('Failed to load data. Please try again.');
       setLoading(false);
@@ -68,12 +68,12 @@ function App() {
       case 0:
         return <Overview latest={data.latest} />;
       case 1:
-        return <Trends 
-            latest={data.latest} 
-            historical={data.historical} 
-            weatherHistory={data.weatherHistory}
-            onDateChange={refreshData}
-          />;
+        return <Trends
+          latest={data.latest}
+          historical={data.historical}
+          weatherHistory={data.weatherHistory}
+          onDateChange={refreshData}
+        />;
       case 2:
         return <Logs logs={data.logs} />;
       case 3:
@@ -85,11 +85,11 @@ function App() {
 
   if (loading && !data.latest) {
     return (
-      <Box 
-        sx={{ 
-          display: 'flex', 
-          justifyContent: 'center', 
-          alignItems: 'center', 
+      <Box
+        sx={{
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
           minHeight: '100vh',
           bgcolor: 'white'
         }}
@@ -102,9 +102,9 @@ function App() {
   return (
     <Box sx={{ pb: 8 }}>
       {/* Status Bar */}
-      <AppBar 
-        position="fixed" 
-        sx={{ 
+      <AppBar
+        position="fixed"
+        sx={{
           bgcolor: 'rgba(255, 255, 255, 0.95)',
           backdropFilter: 'blur(20px)',
           boxShadow: '0 0.5px 0 rgba(0, 0, 0, 0.1)',
@@ -112,11 +112,19 @@ function App() {
         }}
       >
         <Toolbar sx={{ minHeight: '44px !important', py: 0 }}>
-          <ThermostatIcon sx={{ mr: 1, fontSize: 20 }} />
-          <Typography 
-            variant="h6" 
-            component="div" 
-            sx={{ 
+          <img
+            src={logo}
+            alt="Temperature Monitor"
+            style={{
+              height: '28px',
+              width: '28px',
+              marginRight: '8px'
+            }}
+          />
+          <Typography
+            variant="h6"
+            component="div"
+            sx={{
               flexGrow: 1,
               fontSize: '17px',
               fontWeight: 600,
@@ -169,21 +177,21 @@ function App() {
           }
         }}
       >
-        <BottomNavigationAction 
-          label="Overview" 
-          icon={<Home />} 
+        <BottomNavigationAction
+          label="Overview"
+          icon={<Home />}
         />
-        <BottomNavigationAction 
-          label="Trends" 
-          icon={<ShowChart />} 
+        <BottomNavigationAction
+          label="Trends"
+          icon={<ShowChart />}
         />
-        <BottomNavigationAction 
-          label="Logs" 
-          icon={<ListAlt />} 
+        <BottomNavigationAction
+          label="Logs"
+          icon={<ListAlt />}
         />
-        <BottomNavigationAction 
-          label="Settings" 
-          icon={<SettingsIcon />} 
+        <BottomNavigationAction
+          label="Settings"
+          icon={<SettingsIcon />}
         />
       </BottomNavigation>
     </Box>
