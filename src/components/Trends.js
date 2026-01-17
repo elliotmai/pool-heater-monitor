@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
-import { Box, Card, CardContent, Typography, ToggleButtonGroup, ToggleButton, IconButton } from '@mui/material';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Box, Card, CardContent, Typography, ToggleButtonGroup, ToggleButton, IconButton, Chip } from '@mui/material';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, AreaChart, Area, ComposedChart, Bar } from 'recharts';
-import { ArrowBack, ArrowForward } from '@mui/icons-material';
+import { ArrowBack, ArrowForward, Visibility, VisibilityOff } from '@mui/icons-material';
 import { getSensorConfig } from '../config/settingsUtils';
 
 const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
@@ -15,6 +15,40 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
   const aliveSensors = Object.fromEntries(
     Object.entries(SENSOR_CONFIG).filter(([_, config]) => config.enabled !== false)
   );
+
+  // Track which lines are visible (default: all visible)
+  const [visibleLines, setVisibleLines] = useState(() => {
+    const initial = {};
+    Object.keys(aliveSensors).forEach(key => {
+      initial[key] = true;
+    });
+    initial['outdoor_temp'] = true;
+    return initial;
+  });
+
+  // Update visible lines when sensors change
+  useEffect(() => {
+    setVisibleLines(prev => {
+      const updated = { ...prev };
+      Object.keys(aliveSensors).forEach(key => {
+        if (!(key in updated)) {
+          updated[key] = true;
+        }
+      });
+      // Only update if there are actually new sensors
+      if (Object.keys(updated).length !== Object.keys(prev).length) {
+        return updated;
+      }
+      return prev;
+    });
+  }, [aliveSensors]);
+
+  const toggleLine = (lineKey) => {
+    setVisibleLines(prev => ({
+      ...prev,
+      [lineKey]: !prev[lineKey]
+    }));
+  };
 
   const handleViewChange = (event, newView) => {
     if (newView !== null) {
@@ -45,14 +79,14 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
   const displayTimeRange = useMemo(() => {
     const endTime = new Date(viewEndTime);
     const startTime = new Date(endTime.getTime() - (hoursToShow * 60 * 60 * 1000));
-    
+
     return { startTime, endTime };
   }, [viewEndTime, hoursToShow]);
 
   // Filter data based on time range
   const filteredHistorical = useMemo(() => {
     if (!historical || historical.length === 0) return [];
-    
+
     const { startTime, endTime } = displayTimeRange;
     const startTimestamp = startTime.getTime();
     const endTimestamp = endTime.getTime();
@@ -112,39 +146,39 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
         }
       });
     }
-    
+
     const result = filteredHistorical.map(reading => {
       // Find matching weather data (within 5 minutes = 300 seconds)
       let matchingWeather = weatherMap[reading.unix_timestamp];
       if (!matchingWeather && reading.unix_timestamp) {
         // Try to find weather within 5 minutes
         const timestamps = Object.keys(weatherMap).map(Number);
-        const closest = timestamps.find(t => 
+        const closest = timestamps.find(t =>
           Math.abs(t - reading.unix_timestamp) <= 300
         );
         if (closest) {
           matchingWeather = weatherMap[closest];
         }
       }
-      
+
       return {
         ...reading,
         heater_differential: reading.Red && reading.Blue ? reading.Red - reading.Blue : null,
-        avg_temp: reading.Blue && reading.Red && reading.Yellow && reading.Green 
-          ? (reading.Blue + reading.Red + reading.Yellow + reading.Green) / 4 
+        avg_temp: reading.Blue && reading.Red && reading.Yellow && reading.Green
+          ? (reading.Blue + reading.Red + reading.Yellow + reading.Green) / 4
           : null,
         outdoor_temp: matchingWeather?.temp_f || reading.outdoor_temp || null,
         outdoor_humidity: matchingWeather?.humidity || reading.outdoor_humidity || null,
         weather_description: matchingWeather?.description || reading.weather_description || null
       };
     });
-    
+
     return result;
   }, [filteredHistorical, weatherHistory]);
 
   // Check if we have outdoor temperature data
   const hasOutdoorData = useMemo(() => {
-    const hasData = dataWithDifferentials.some(reading => 
+    const hasData = dataWithDifferentials.some(reading =>
       reading.outdoor_temp !== null && reading.outdoor_temp !== undefined
     );
     return hasData;
@@ -157,7 +191,7 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
     }
 
     const allTemps = [];
-    
+
     // Collect all temperature values from alive sensors only
     filteredHistorical.forEach(reading => {
       Object.keys(aliveSensors).forEach(sensorName => {
@@ -166,7 +200,7 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
           allTemps.push(temp);
         }
       });
-      
+
       // Include outdoor temp if available
       if (reading.outdoor_temp !== null && reading.outdoor_temp !== undefined) {
         allTemps.push(reading.outdoor_temp);
@@ -188,18 +222,18 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
   // Format time range for display
   const formatTimeRange = () => {
     const { startTime, endTime } = displayTimeRange;
-    
-    const formatTime = (date) => date.toLocaleTimeString('en-US', { 
-      hour: 'numeric', 
+
+    const formatTime = (date) => date.toLocaleTimeString('en-US', {
+      hour: 'numeric',
       minute: '2-digit',
       hour12: true
     });
-    
-    const formatDate = (date) => date.toLocaleDateString('en-US', { 
-      month: 'short', 
+
+    const formatDate = (date) => date.toLocaleDateString('en-US', {
+      month: 'short',
       day: 'numeric'
     });
-    
+
     // If times span different days
     if (startTime.toDateString() !== endTime.toDateString()) {
       return `${formatDate(startTime)} ${formatTime(startTime)} - ${formatDate(endTime)} ${formatTime(endTime)}`;
@@ -236,7 +270,7 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
             }
           }}
         >
-          <ToggleButton value="all">All Sensors</ToggleButton>
+          {/* <ToggleButton value="all">All Sensors</ToggleButton> */}
           {/* <ToggleButton value="heater">Heater Performance</ToggleButton>
           <ToggleButton value="comparison">Indoor vs Outdoor</ToggleButton> */}
         </ToggleButtonGroup>
@@ -273,19 +307,19 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
 
         {/* Time Navigation */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
-          <IconButton 
+          <IconButton
             onClick={goBackward}
             size="small"
-            sx={{ 
+            sx={{
               color: '#007aff',
             }}
           >
             <ArrowBack fontSize="small" />
           </IconButton>
           <Box sx={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 0.5 }}>
-            <Typography 
-              variant="caption" 
-              sx={{ 
+            <Typography
+              variant="caption"
+              sx={{
                 fontSize: '11px',
                 color: '#1c1c1e',
                 fontWeight: 500,
@@ -313,11 +347,11 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
               </Typography>
             )}
           </Box>
-          <IconButton 
+          <IconButton
             onClick={goForward}
             disabled={!canGoForward}
             size="small"
-            sx={{ 
+            sx={{
               color: '#007aff',
               '&.Mui-disabled': {
                 color: '#c7c7cc'
@@ -330,9 +364,9 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
 
         {/* Data availability info */}
         {filteredHistorical.length === 0 && (
-          <Typography 
-            variant="caption" 
-            sx={{ 
+          <Typography
+            variant="caption"
+            sx={{
               fontSize: '10px',
               color: '#ff3b30',
               textAlign: 'center',
@@ -342,9 +376,9 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
           </Typography>
         )}
         {filteredHistorical.length > 0 && (
-          <Typography 
-            variant="caption" 
-            sx={{ 
+          <Typography
+            variant="caption"
+            sx={{
               fontSize: '10px',
               color: '#8e8e93',
               textAlign: 'center',
@@ -355,13 +389,62 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
         )}
       </Box>
 
+      {/* Line Visibility Toggles */}
+      {chartView === 'all' && (
+        <Box sx={{ mb: 2, display: 'flex', flexWrap: 'wrap', gap: 1, justifyContent: 'center' }}>
+          {Object.entries(aliveSensors).map(([sensorName, config]) => (
+            <Chip
+              key={sensorName}
+              label={config.displayName}
+              onClick={() => toggleLine(sensorName)}
+              icon={visibleLines[sensorName] ? <Visibility sx={{ fontSize: 16 }} /> : <VisibilityOff sx={{ fontSize: 16 }} />}
+              sx={{
+                backgroundColor: visibleLines[sensorName] ? config.color : '#e0e0e0',
+                color: visibleLines[sensorName] ? 'white' : '#8e8e93',
+                fontWeight: 600,
+                fontSize: '11px',
+                height: '28px',
+                '&:hover': {
+                  backgroundColor: visibleLines[sensorName] ? config.color : '#d0d0d0',
+                  opacity: 0.9
+                },
+                '& .MuiChip-icon': {
+                  color: visibleLines[sensorName] ? 'white' : '#8e8e93'
+                }
+              }}
+            />
+          ))}
+          {hasOutdoorData && (
+            <Chip
+              label="Outdoor Temp"
+              onClick={() => toggleLine('outdoor_temp')}
+              icon={visibleLines['outdoor_temp'] ? <Visibility sx={{ fontSize: 16 }} /> : <VisibilityOff sx={{ fontSize: 16 }} />}
+              sx={{
+                backgroundColor: visibleLines['outdoor_temp'] ? 'grey' : '#e0e0e0',
+                color: visibleLines['outdoor_temp'] ? 'white' : '#8e8e93',
+                fontWeight: 600,
+                fontSize: '11px',
+                height: '28px',
+                '&:hover': {
+                  backgroundColor: visibleLines['outdoor_temp'] ? 'grey' : '#d0d0d0',
+                  opacity: 0.9
+                },
+                '& .MuiChip-icon': {
+                  color: visibleLines['outdoor_temp'] ? 'white' : '#8e8e93'
+                }
+              }}
+            />
+          )}
+        </Box>
+      )}
+
       {/* All Sensors Chart */}
       {chartView === 'all' && (
         <Card sx={{ boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)' }}>
           <CardContent>
-            <Typography 
-              variant="overline" 
-              sx={{ 
+            <Typography
+              variant="overline"
+              sx={{
                 fontSize: '13px',
                 fontWeight: 600,
                 color: '#8e8e93',
@@ -371,35 +454,35 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
                 mb: 1
               }}
             >
-              All Temperature Sensors
+              {/* All Temperature Sensors */}
             </Typography>
-            
+
             <Box sx={{ mt: 2, height: 300 }}>
               {filteredHistorical && filteredHistorical.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
-                  <LineChart 
+                  <LineChart
                     data={filteredHistorical}
                     margin={{ top: 5, right: 10, left: 0, bottom: 5 }}
                   >
                     <CartesianGrid strokeDasharray="3 3" stroke="rgba(0, 0, 0, 0.05)" />
-                    <XAxis 
-                      dataKey="time" 
+                    <XAxis
+                      dataKey="time"
                       tick={{ fontSize: 10 }}
                       angle={-45}
                       textAnchor="end"
                       height={60}
                     />
-                    <YAxis 
+                    <YAxis
                       domain={temperatureDomain}
                       tick={{ fontSize: 11 }}
-                      label={{ 
-                        value: 'Temperature (°F)', 
-                        angle: -90, 
+                      label={{
+                        value: 'Temperature (°F)',
+                        angle: -90,
                         position: 'insideLeft',
                         style: { fontSize: 11 }
                       }}
                     />
-                    <Tooltip 
+                    <Tooltip
                       contentStyle={{
                         backgroundColor: 'rgba(0, 0, 0, 0.8)',
                         border: 'none',
@@ -410,19 +493,22 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
                       formatter={(value) => (value != null && typeof value === 'number') ? [`${value.toFixed(1)}°F`] : ['N/A']}
                     />
                     <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '10px' }} />
-                    {Object.entries(aliveSensors).map(([sensorName, config]) => (
+                    {Object.entries(aliveSensors).map(([sensorName, config]) =>
+                      visibleLines[sensorName] && (
+                        <Line
+                          key={sensorName}
+                          type="monotone"
+                          dataKey={sensorName}
+                          stroke={config.color}
+                          strokeWidth={2}
+                          name={config.displayName}
+                          dot={false}
+                          activeDot={{ r: 4 }}
+                        />
+                      )
+                    )}
+                    {visibleLines['outdoor_temp'] && hasOutdoorData && (
                       <Line
-                        key={sensorName}
-                        type="monotone"
-                        dataKey={sensorName}
-                        stroke={config.color}
-                        strokeWidth={2}
-                        name={config.displayName}
-                        dot={false}
-                        activeDot={{ r: 4 }}
-                      />
-                    ))}
-                    <Line
                         type="monotone"
                         dataKey="outdoor_temp"
                         stroke="grey"
@@ -431,13 +517,14 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
                         name="Outdoor Temp"
                         dot={false}
                       />
+                    )}
                   </LineChart>
                 </ResponsiveContainer>
               ) : (
-                <Box 
-                  sx={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
+                <Box
+                  sx={{
+                    display: 'flex',
+                    alignItems: 'center',
                     justifyContent: 'center',
                     height: '100%',
                     color: '#8e8e93'
@@ -450,15 +537,15 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
           </CardContent>
         </Card>
       )}
- 
+
       {/* Heater Performance Chart */}
       {chartView === 'heater' && (
         <>
           <Card sx={{ boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)', mb: 2 }}>
             <CardContent>
-              <Typography 
-                variant="overline" 
-                sx={{ 
+              <Typography
+                variant="overline"
+                sx={{
                   fontSize: '13px',
                   fontWeight: 600,
                   color: '#8e8e93',
@@ -470,32 +557,32 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
               >
                 Heater Input/Output
               </Typography>
-              
+
               <Box sx={{ mt: 2, height: 300 }}>
                 {filteredHistorical && filteredHistorical.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart 
+                    <LineChart
                       data={filteredHistorical}
                       margin={{ top: 5, right: 10, left: 0, bottom: 5 }}
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(0, 0, 0, 0.05)" />
-                      <XAxis 
-                        dataKey="time" 
+                      <XAxis
+                        dataKey="time"
                         tick={{ fontSize: 10 }}
                         angle={-45}
                         textAnchor="end"
                         height={60}
                       />
-                      <YAxis 
+                      <YAxis
                         tick={{ fontSize: 11 }}
-                        label={{ 
-                          value: 'Temperature (°F)', 
-                          angle: -90, 
+                        label={{
+                          value: 'Temperature (°F)',
+                          angle: -90,
                           position: 'insideLeft',
                           style: { fontSize: 11 }
                         }}
                       />
-                      <Tooltip 
+                      <Tooltip
                         contentStyle={{
                           backgroundColor: 'rgba(0, 0, 0, 0.8)',
                           border: 'none',
@@ -527,10 +614,10 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
                     </LineChart>
                   </ResponsiveContainer>
                 ) : (
-                  <Box 
-                    sx={{ 
-                      display: 'flex', 
-                      alignItems: 'center', 
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'center',
                       justifyContent: 'center',
                       height: '100%',
                       color: '#8e8e93'
@@ -545,9 +632,9 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
 
           <Card sx={{ boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)' }}>
             <CardContent>
-              <Typography 
-                variant="overline" 
-                sx={{ 
+              <Typography
+                variant="overline"
+                sx={{
                   fontSize: '13px',
                   fontWeight: 600,
                   color: '#8e8e93',
@@ -559,32 +646,32 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
               >
                 Temperature Differential (Output - Input)
               </Typography>
-              
+
               <Box sx={{ mt: 2, height: 250 }}>
                 {dataWithDifferentials && dataWithDifferentials.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart 
+                    <ComposedChart
                       data={dataWithDifferentials}
                       margin={{ top: 5, right: 10, left: 0, bottom: 5 }}
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(0, 0, 0, 0.05)" />
-                      <XAxis 
-                        dataKey="time" 
+                      <XAxis
+                        dataKey="time"
                         tick={{ fontSize: 10 }}
                         angle={-45}
                         textAnchor="end"
                         height={60}
                       />
-                      <YAxis 
+                      <YAxis
                         tick={{ fontSize: 11 }}
-                        label={{ 
-                          value: 'Δ Temperature (°F)', 
-                          angle: -90, 
+                        label={{
+                          value: 'Δ Temperature (°F)',
+                          angle: -90,
                           position: 'insideLeft',
                           style: { fontSize: 11 }
                         }}
                       />
-                      <Tooltip 
+                      <Tooltip
                         contentStyle={{
                           backgroundColor: 'rgba(0, 0, 0, 0.8)',
                           border: 'none',
@@ -604,10 +691,10 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
                     </ComposedChart>
                   </ResponsiveContainer>
                 ) : (
-                  <Box 
-                    sx={{ 
-                      display: 'flex', 
-                      alignItems: 'center', 
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'center',
                       justifyContent: 'center',
                       height: '100%',
                       color: '#8e8e93'
@@ -627,9 +714,9 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
         <>
           <Card sx={{ boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)', mb: 2 }}>
             <CardContent>
-              <Typography 
-                variant="overline" 
-                sx={{ 
+              <Typography
+                variant="overline"
+                sx={{
                   fontSize: '13px',
                   fontWeight: 600,
                   color: '#8e8e93',
@@ -641,32 +728,32 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
               >
                 Pool Temperature vs Outdoor Temperature
               </Typography>
-              
+
               <Box sx={{ mt: 2, height: 300 }}>
                 {dataWithDifferentials && dataWithDifferentials.length > 0 && hasOutdoorData ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <LineChart 
+                    <LineChart
                       data={dataWithDifferentials}
                       margin={{ top: 5, right: 10, left: 0, bottom: 5 }}
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(0, 0, 0, 0.05)" />
-                      <XAxis 
-                        dataKey="time" 
+                      <XAxis
+                        dataKey="time"
                         tick={{ fontSize: 10 }}
                         angle={-45}
                         textAnchor="end"
                         height={60}
                       />
-                      <YAxis 
+                      <YAxis
                         tick={{ fontSize: 11 }}
-                        label={{ 
-                          value: 'Temperature (°F)', 
-                          angle: -90, 
+                        label={{
+                          value: 'Temperature (°F)',
+                          angle: -90,
                           position: 'insideLeft',
                           style: { fontSize: 11 }
                         }}
                       />
-                      <Tooltip 
+                      <Tooltip
                         contentStyle={{
                           backgroundColor: 'rgba(0, 0, 0, 0.8)',
                           border: 'none',
@@ -709,10 +796,10 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
                     </LineChart>
                   </ResponsiveContainer>
                 ) : (
-                  <Box 
-                    sx={{ 
-                      display: 'flex', 
-                      alignItems: 'center', 
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'center',
                       justifyContent: 'center',
                       height: '100%',
                       color: '#8e8e93'
@@ -729,9 +816,9 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
 
           <Card sx={{ boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)' }}>
             <CardContent>
-              <Typography 
-                variant="overline" 
-                sx={{ 
+              <Typography
+                variant="overline"
+                sx={{
                   fontSize: '13px',
                   fontWeight: 600,
                   color: '#8e8e93',
@@ -743,30 +830,30 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
               >
                 System Temperature Distribution
               </Typography>
-              
+
               <Box sx={{ mt: 2, height: 250 }}>
                 {filteredHistorical && filteredHistorical.length > 0 ? (
                   <ResponsiveContainer width="100%" height="100%">
-                    <AreaChart 
+                    <AreaChart
                       data={filteredHistorical}
                       margin={{ top: 5, right: 10, left: 0, bottom: 5 }}
                       stackOffset="expand"
                     >
                       <CartesianGrid strokeDasharray="3 3" stroke="rgba(0, 0, 0, 0.05)" />
-                      <XAxis 
-                        dataKey="time" 
+                      <XAxis
+                        dataKey="time"
                         tick={{ fontSize: 10 }}
                         angle={-45}
                         textAnchor="end"
                         height={60}
                       />
-                      <YAxis 
+                      <YAxis
                         tick={{ fontSize: 11 }}
                         tickFormatter={(value) => {
                           return (value != null && typeof value === 'number') ? `${(value * 100).toFixed(1)}%` : 'N/A';
                         }}
                       />
-                      <Tooltip 
+                      <Tooltip
                         contentStyle={{
                           backgroundColor: 'rgba(0, 0, 0, 0.8)',
                           border: 'none',
@@ -793,10 +880,10 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
                     </AreaChart>
                   </ResponsiveContainer>
                 ) : (
-                  <Box 
-                    sx={{ 
-                      display: 'flex', 
-                      alignItems: 'center', 
+                  <Box
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'center',
                       justifyContent: 'center',
                       height: '100%',
                       color: '#8e8e93'
@@ -809,11 +896,11 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
             </CardContent>
           </Card>
         </>
-      )} 
+      )}
 
-      <Typography 
-        variant="caption" 
-        sx={{ 
+      <Typography
+        variant="caption"
+        sx={{
           textAlign: 'center',
           fontSize: '11px',
           color: '#8e8e93',
@@ -821,16 +908,16 @@ const Trends = ({ latest, historical, weatherHistory, onDateChange }) => {
           py: 1.5
         }}
       >
-        Last updated: {latest?.timestamp ? new Date(latest.timestamp).toLocaleString('en-US', { 
-          month: 'short', 
-          day: 'numeric', 
-          hour: '2-digit', 
-          minute: '2-digit' 
+        Last updated: {latest?.timestamp ? new Date(latest.timestamp).toLocaleString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
         }) : 'Never'}
       </Typography>
 
     </Box>
-    
+
   );
 };
 

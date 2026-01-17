@@ -152,6 +152,7 @@ function App() {
         onChange={(event, newValue) => setCurrentTab(newValue)}
         sx={{
           position: 'fixed',
+          zIndex: 1000,
           bottom: 0,
           left: 0,
           right: 0,

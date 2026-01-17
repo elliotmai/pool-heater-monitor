@@ -12,10 +12,14 @@ import {
   InputAdornment,
   Switch,
   FormControlLabel,
-  Chip,
+  // Chip,
   CircularProgress
 } from '@mui/material';
-import { Save, Refresh, CloudSync } from '@mui/icons-material';
+import { 
+  Save, 
+  Refresh, 
+  // CloudSync 
+} from '@mui/icons-material';
 import { updateSensorConfig } from '../services/api';
 
 const Settings = ({ sensorConfig, onRefresh }) => {
@@ -92,7 +96,7 @@ const Settings = ({ sensorConfig, onRefresh }) => {
 
   return (
     <Box sx={{ p: 2 }}>
-      {/* Info Card */}
+      {/* Info Card
       <Card sx={{ boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)', mb: 2, bgcolor: '#f8f9fa' }}>
         <CardContent>
           <Box sx={{ display: 'flex', alignItems: 'start', gap: 1.5, mb: 1 }}>
@@ -129,7 +133,7 @@ const Settings = ({ sensorConfig, onRefresh }) => {
             </Box>
           </Box>
         </CardContent>
-      </Card>
+      </Card> */}
 
       {/* Sensor Settings */}
       <Card sx={{ boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)', mb: 2 }}>
