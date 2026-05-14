@@ -3,7 +3,7 @@
   "name": "House Weather Monitor",
   "icons": [
     {
-      "src": "apple-logo-gradient.png",
+      "src": "house-weather-logo-minimal.svg",
       "type": "image/png",
       "sizes": "180x180",
       "purpose": "any"

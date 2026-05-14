@@ -1,9 +1,11 @@
-import { 
-  ref, 
+import {
+  ref,
   get,
   set,
   update,
-  remove } from 'firebase/database';
+  query,
+  orderByKey,
+  limitToLast } from 'firebase/database';
 import { database } from '../config/firebase';
 
 /**
@@ -188,11 +190,15 @@ export const fetchLatestData = async () => {
 export const fetchHistoricalData = async (targetDate = new Date()) => {
   try {
     const readingsRef = ref(database, 'water-heater-user/readings');
-    const weatherHistoryRef = ref(database, 'water-heater-user/weather_history');
-    
+    const weatherQuery = query(
+      ref(database, 'water-heater-user/weather_history'),
+      orderByKey(),
+      limitToLast(500)
+    );
+
     const [sensorsSnapshot, weatherSnapshot] = await Promise.all([
       get(readingsRef),
-      get(weatherHistoryRef)
+      get(weatherQuery)
     ]);
     
     if (!sensorsSnapshot.exists()) {
@@ -270,25 +276,28 @@ export const fetchHistoricalData = async (targetDate = new Date()) => {
  */
 export const fetchLogs = async () => {
   try {
-    const logsRef = ref(database, 'water-heater-user/logs');
-    const snapshot = await get(logsRef);
-    
+    const logsQuery = query(
+      ref(database, 'water-heater-user/logs'),
+      orderByKey(),
+      limitToLast(2000)
+    );
+    const snapshot = await get(logsQuery);
+
     if (!snapshot.exists()) return [];
-    
+
     const data = snapshot.val();
-    
+
     if (data) {
-      // Filter to last 7 days based on timestamp field
-      const sevenDaysAgo = new Date();
-      sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-      const cutoffTime = sevenDaysAgo.getTime();
-      
-      // Convert to array, filter by last 7 days, and reverse (newest first)
+      const fiveDaysAgo = new Date();
+      fiveDaysAgo.setDate(fiveDaysAgo.getDate() - 5);
+      const cutoffTime = fiveDaysAgo.getTime();
+
       return Object.values(data)
         .filter(log => {
           if (!log.timestamp) return false;
-          const logTime = new Date(log.timestamp).getTime();
-          return logTime >= cutoffTime;
+          if (new Date(log.timestamp).getTime() < cutoffTime) return false;
+          const level = (log.level || '').toUpperCase();
+          return level === 'ERROR' || level === 'WARNING';
         })
         .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
     }
@@ -304,17 +313,22 @@ export const fetchLogs = async () => {
  */
 export const fetchWeatherHistory = async () => {
   try {
-    const weatherHistoryRef = ref(database, 'water-heater-user/weather_history');
-    const snapshot = await get(weatherHistoryRef);
-    
+    const weatherQuery = query(
+      ref(database, 'water-heater-user/weather_history'),
+      orderByKey(),
+      limitToLast(1500)
+    );
+    const snapshot = await get(weatherQuery);
+
     if (!snapshot.exists()) return [];
-    
+
     const data = snapshot.val();
-    
+
     if (data) {
+      const fiveDaysAgoUnix = Math.floor(Date.now() / 1000) - 5 * 24 * 60 * 60;
       return Object.values(data)
+        .filter(w => (w.unix_timestamp || 0) >= fiveDaysAgoUnix)
         .sort((a, b) => a.unix_timestamp - b.unix_timestamp)
-        .slice(-100)
         .map(weather => ({
           ...weather,
           timestamp: weather.timestamp || new Date(weather.unix_timestamp * 1000).toISOString()
@@ -325,75 +339,6 @@ export const fetchWeatherHistory = async () => {
     console.error('Weather history fetch error:', error);
     return [];
   }
-};
-
-/**
- * Delete records older than 7 days from Firebase tables
- */
-export const cleanupOldRecords = async () => {
-  const sevenDaysAgo = new Date();
-  sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-  const cutoffTimestamp = Math.floor(sevenDaysAgo.getTime() / 1000);
-
-  const tables = ['logs', 'readings', 'weather_history'];
-  const results = {
-    success: [],
-    errors: []
-  };
-
-  for (const table of tables) {
-    try {
-      const tableRef = ref(database, `water-heater-user/${table}`);
-      const snapshot = await get(tableRef);
-      
-      if (!snapshot.exists()) {
-        results.success.push({ table, deletedCount: 0 });
-        continue;
-      }
-
-      const data = snapshot.val();
-      
-      // Find records to delete
-      const keysToDelete = [];
-      Object.entries(data).forEach(([key, record]) => {
-        let recordTimestamp;
-        
-        if (record.unix_timestamp) {
-          recordTimestamp = record.unix_timestamp;
-        } else if (record.timestamp) {
-          recordTimestamp = Math.floor(new Date(record.timestamp).getTime() / 1000);
-        } else {
-          return;
-        }
-
-        if (recordTimestamp < cutoffTimestamp) {
-          keysToDelete.push(key);
-        }
-      });
-
-      // Delete old records
-      let deletedCount = 0;
-      for (const key of keysToDelete) {
-        const recordRef = ref(database, `water-heater-user/${table}/${key}`);
-        await remove(recordRef);
-        deletedCount++;
-      }
-
-      results.success.push({ 
-        table, 
-        deletedCount,
-        totalRecords: Object.keys(data).length 
-      });
-
-    } catch (error) {
-      results.errors.push({ 
-        table, 
-        error: error.message 
-      });
-    }
-  }
-
-  return results;
 };
 
 /**
@@ -413,13 +358,11 @@ export const fetchAllData = async (targetDate) => {
   // Auto-discover any new sensors and create their config
   const updatedSensorConfig = await discoverAndEnsureSensors(latest, sensorConfig);
 
-  cleanupOldRecords();
-
-  return { 
-    latest, 
-    historical, 
-    weatherHistory, 
+  return {
+    latest,
+    historical,
+    weatherHistory,
     logs,
-    sensorConfig: updatedSensorConfig 
+    sensorConfig: updatedSensorConfig
   };
 };

@@ -22,7 +22,7 @@ import Settings from './components/Settings';
 import { fetchAllData } from './services/api';
 import { setSensorConfig } from './config/settingsUtils';
 import { CONFIG } from './config/config';
-import logo from './temperature-monitor-logo.png';
+import logo from './house-weather-logo-minimal.svg';
 import './App.css';
 
 function App() {

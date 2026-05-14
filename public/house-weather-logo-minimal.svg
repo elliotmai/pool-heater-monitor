@@ -1,0 +1,45 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <defs>
+    <linearGradient id="bg2" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#5ac8fa"/>
+      <stop offset="100%" stop-color="#007aff"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Rounded square background -->
+  <rect x="0" y="0" width="512" height="512" rx="114" ry="114" fill="url(#bg2)"/>
+
+  <!-- Subtle top highlight -->
+  <rect x="0" y="0" width="512" height="220" rx="114" ry="114" fill="white" opacity="0.08"/>
+
+  <!-- Minimalist house outline -->
+  <path d="M 256 138
+           L 130 244
+           M 256 138
+           L 382 244
+           M 152 226
+           L 152 392
+           Q 152 402 162 402
+           L 350 402
+           Q 360 402 360 392
+           L 360 226"
+        fill="none"
+        stroke="white"
+        stroke-width="18"
+        stroke-linecap="round"
+        stroke-linejoin="round"/>
+
+  <!-- Temperature curve (like a stylized thermometer reading) inside -->
+  <path d="M 200 340
+           Q 228 290 256 320
+           T 312 300"
+        fill="none"
+        stroke="white"
+        stroke-width="14"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        opacity="0.95"/>
+
+  <!-- Dot at the end of the curve -->
+  <circle cx="312" cy="300" r="10" fill="white"/>
+</svg>

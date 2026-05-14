@@ -180,6 +180,10 @@ const Overview = ({ latest, weather }) => {
 
   // Use weather from latest data
   const weatherData = latest?.weather;
+  if (weatherData?.temp_f === -100 && weather) weatherData.temp_f = '--';
+  if (weatherData?.temp_c === -100 && weather) weatherData.temp_c = '--';
+  if (weatherData?.humidity === -100 && weather) weatherData.humidity = '--';
+  if (weatherData?.description === 'None' || !weather) weatherData.description = '--';
 
   // Filter to only show alive sensors (enabled = alive from Firebase)
   const aliveSensors = Object.entries(SENSOR_CONFIG).filter(
@@ -419,7 +423,7 @@ const Overview = ({ latest, weather }) => {
                 <WeatherCard
                   label="Conditions"
                   value={weatherData.icon ? <img src={weatherData.icon} alt="weather" style={{ width: '40px', height: '40px' }} /> : 'N/A'}
-                  subtitle={weatherData.description || ''}
+                  subtitle={weatherData.description || '--'}
                 />
               </Grid>
             </Grid>
