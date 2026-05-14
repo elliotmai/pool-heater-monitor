@@ -6,7 +6,6 @@ import {
   Typography,
   BottomNavigation,
   BottomNavigationAction,
-  CircularProgress,
   Alert
 } from '@mui/material';
 import {
@@ -19,7 +18,8 @@ import Overview from './components/Overview';
 import Trends from './components/Trends';
 import Logs from './components/Logs';
 import Settings from './components/Settings';
-import { fetchAllData } from './services/api';
+import LoadingScreen from './components/LoadingScreen';
+import { fetchInitialData, fetchBackgroundData } from './services/api';
 import { setSensorConfig } from './config/settingsUtils';
 import { CONFIG } from './config/config';
 import logo from './house-weather-logo-minimal.svg';
@@ -40,14 +40,23 @@ function App() {
   const refreshData = async (targetDate) => {
     try {
       setError(null);
-      const newData = await fetchAllData(targetDate);
-      setData(newData);
 
-      // Update the global sensor config cache
-      setSensorConfig(newData.sensorConfig);
-
+      const initial = await fetchInitialData();
+      setData(prev => ({
+        ...prev,
+        latest: initial.latest,
+        sensorConfig: initial.sensorConfig,
+      }));
+      setSensorConfig(initial.sensorConfig);
       setLoading(false);
 
+      const background = await fetchBackgroundData(targetDate);
+      setData(prev => ({
+        ...prev,
+        historical: background.historical,
+        weatherHistory: background.weatherHistory,
+        logs: background.logs,
+      }));
     } catch (err) {
       setError('Failed to load data. Please try again.');
       setLoading(false);
@@ -55,11 +64,9 @@ function App() {
   };
 
   useEffect(() => {
-    // Fetch data on mount
     refreshData();
 
-    // Set up auto-refresh
-    const interval = setInterval(refreshData, CONFIG.REFRESH_INTERVAL);
+    const interval = setInterval(() => refreshData(), CONFIG.REFRESH_INTERVAL);
     return () => clearInterval(interval);
   }, []);
 
@@ -83,20 +90,8 @@ function App() {
     }
   };
 
-  if (loading && !data.latest) {
-    return (
-      <Box
-        sx={{
-          display: 'flex',
-          justifyContent: 'center',
-          alignItems: 'center',
-          minHeight: '100vh',
-          bgcolor: 'white'
-        }}
-      >
-        <CircularProgress />
-      </Box>
-    );
+  if (loading) {
+    return <LoadingScreen />;
   }
 
   return (

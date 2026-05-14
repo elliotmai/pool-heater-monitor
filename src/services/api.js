@@ -342,27 +342,33 @@ export const fetchWeatherHistory = async () => {
 };
 
 /**
- * Fetch all data in parallel, including sensor configuration
+ * Fetch the smallest critical payload needed to render the Overview tab.
+ * Used to unblock the UI as fast as possible on first paint.
  */
-export const fetchAllData = async (targetDate) => {
-  // First, fetch sensor configuration from Firebase
-  const sensorConfig = await fetchSensorConfig();
+export const fetchInitialData = async () => {
+  const [sensorConfig, latest] = await Promise.all([
+    fetchSensorConfig(),
+    fetchLatestData()
+  ]);
 
-  const [latest, historical, weatherHistory, logs] = await Promise.all([
-    fetchLatestData(),
+  const updatedSensorConfig = await discoverAndEnsureSensors(latest, sensorConfig);
+
+  return {
+    latest,
+    sensorConfig: updatedSensorConfig
+  };
+};
+
+/**
+ * Fetch the larger payloads needed for the Trends and Logs tabs.
+ * Runs after fetchInitialData so the Overview is already visible.
+ */
+export const fetchBackgroundData = async (targetDate) => {
+  const [historical, weatherHistory, logs] = await Promise.all([
     fetchHistoricalData(targetDate),
     fetchWeatherHistory(),
     fetchLogs()
   ]);
 
-  // Auto-discover any new sensors and create their config
-  const updatedSensorConfig = await discoverAndEnsureSensors(latest, sensorConfig);
-
-  return {
-    latest,
-    historical,
-    weatherHistory,
-    logs,
-    sensorConfig: updatedSensorConfig
-  };
+  return { historical, weatherHistory, logs };
 };
