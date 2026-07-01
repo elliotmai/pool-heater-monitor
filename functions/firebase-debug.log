@@ -1,0 +1,72 @@
+[debug] [2026-07-01T03:24:37.708Z] ----------------------------------------------------------------------
+[debug] [2026-07-01T03:24:37.710Z] Command:       C:\Program Files\nodejs\node.exe C:\Users\stock\AppData\Roaming\npm\node_modules\firebase-tools\lib\bin\firebase.js deploy --only functions:enforceTtl
+[debug] [2026-07-01T03:24:37.710Z] CLI Version:   15.22.4
+[debug] [2026-07-01T03:24:37.711Z] Platform:      win32
+[debug] [2026-07-01T03:24:37.711Z] Node Version:  v24.13.1
+[debug] [2026-07-01T03:24:37.711Z] Detected Agent: unknown
+[debug] [2026-07-01T03:24:37.711Z] Time:          Tue Jun 30 2026 22:24:37 GMT-0500 (Central Daylight Time)
+[debug] [2026-07-01T03:24:37.711Z] ----------------------------------------------------------------------
+[debug] 
+[debug] [2026-07-01T03:24:38.830Z] > command requires scopes: ["email","openid","https://www.googleapis.com/auth/cloudplatformprojects.readonly","https://www.googleapis.com/auth/firebase","https://www.googleapis.com/auth/cloud-platform"]
+[debug] [2026-07-01T03:24:38.830Z] > authorizing via signed-in user (eli.mai12932@gmail.com)
+[debug] [2026-07-01T03:24:38.830Z] [iam] checking project water-heater-sensors for permissions ["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]
+[debug] [2026-07-01T03:24:38.832Z] Checked if tokens are valid: true, expires at: 1782879663827
+[debug] [2026-07-01T03:24:38.832Z] Checked if tokens are valid: true, expires at: 1782879663827
+[debug] [2026-07-01T03:24:38.832Z] >>> [apiv2][query] POST https://cloudresourcemanager.googleapis.com/v1/projects/water-heater-sensors:testIamPermissions [none]
+[debug] [2026-07-01T03:24:38.832Z] >>> [apiv2][(partial)header] POST https://cloudresourcemanager.googleapis.com/v1/projects/water-heater-sensors:testIamPermissions  x-goog-user-project=water-heater-sensors
+[debug] [2026-07-01T03:24:38.832Z] >>> [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/water-heater-sensors:testIamPermissions {"permissions":["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]}
+[debug] [2026-07-01T03:24:39.129Z] <<< [apiv2][status] POST https://cloudresourcemanager.googleapis.com/v1/projects/water-heater-sensors:testIamPermissions 200
+[debug] [2026-07-01T03:24:39.129Z] <<< [apiv2][body] POST https://cloudresourcemanager.googleapis.com/v1/projects/water-heater-sensors:testIamPermissions {"permissions":["cloudfunctions.functions.create","cloudfunctions.functions.delete","cloudfunctions.functions.get","cloudfunctions.functions.list","cloudfunctions.functions.update","cloudfunctions.operations.get","firebase.projects.get"]}
+[debug] [2026-07-01T03:24:39.130Z] Checked if tokens are valid: true, expires at: 1782879663827
+[debug] [2026-07-01T03:24:39.130Z] Checked if tokens are valid: true, expires at: 1782879663827
+[debug] [2026-07-01T03:24:39.130Z] >>> [apiv2][query] POST https://iam.googleapis.com/v1/projects/water-heater-sensors/serviceAccounts/water-heater-sensors@appspot.gserviceaccount.com:testIamPermissions [none]
+[debug] [2026-07-01T03:24:39.130Z] >>> [apiv2][body] POST https://iam.googleapis.com/v1/projects/water-heater-sensors/serviceAccounts/water-heater-sensors@appspot.gserviceaccount.com:testIamPermissions {"permissions":["iam.serviceAccounts.actAs"]}
+[debug] [2026-07-01T03:24:39.362Z] <<< [apiv2][status] POST https://iam.googleapis.com/v1/projects/water-heater-sensors/serviceAccounts/water-heater-sensors@appspot.gserviceaccount.com:testIamPermissions 404
+[debug] [2026-07-01T03:24:39.362Z] <<< [apiv2][body] POST https://iam.googleapis.com/v1/projects/water-heater-sensors/serviceAccounts/water-heater-sensors@appspot.gserviceaccount.com:testIamPermissions {"error":{"code":404,"message":"Unknown service account","status":"NOT_FOUND"}}
+[debug] [2026-07-01T03:24:39.363Z] [functions] service account IAM check errored, deploy may fail: Request to https://iam.googleapis.com/v1/projects/water-heater-sensors/serviceAccounts/water-heater-sensors@appspot.gserviceaccount.com:testIamPermissions had HTTP Error: 404, Unknown service account {"name":"FirebaseError","children":[],"context":{"body":{"error":{"code":404,"message":"Unknown service account","status":"NOT_FOUND"}},"response":{"statusCode":404}},"exit":1,"message":"Request to https://iam.googleapis.com/v1/projects/water-heater-sensors/serviceAccounts/water-heater-sensors@appspot.gserviceaccount.com:testIamPermissions had HTTP Error: 404, Unknown service account","status":404}
+[info] 
+[info] === Deploying to 'water-heater-sensors'...
+[info] 
+[info] i  deploying functions 
+[debug] [2026-07-01T03:24:39.367Z] Checked if tokens are valid: true, expires at: 1782879663827
+[debug] [2026-07-01T03:24:39.367Z] Checked if tokens are valid: true, expires at: 1782879663827
+[debug] [2026-07-01T03:24:39.368Z] >>> [apiv2][query] GET https://cloudresourcemanager.googleapis.com/v1/projects/water-heater-sensors [none]
+[debug] [2026-07-01T03:24:39.457Z] <<< [apiv2][status] GET https://cloudresourcemanager.googleapis.com/v1/projects/water-heater-sensors 200
+[debug] [2026-07-01T03:24:39.457Z] <<< [apiv2][body] GET https://cloudresourcemanager.googleapis.com/v1/projects/water-heater-sensors {"projectNumber":"363833716089","projectId":"water-heater-sensors","lifecycleState":"ACTIVE","name":"Water Heater Sensors","labels":{"firebase":"enabled","firebase-core":"disabled"},"createTime":"2025-09-30T20:58:27.054370Z"}
+[info] i  functions: preparing codebase default for deployment 
+[info] i  functions: ensuring required API cloudfunctions.googleapis.com is enabled... 
+[info] i  functions: ensuring required API cloudbuild.googleapis.com is enabled... 
+[info] i  artifactregistry: ensuring required API artifactregistry.googleapis.com is enabled... 
+[debug] [2026-07-01T03:24:39.460Z] Checked if tokens are valid: true, expires at: 1782879663827
+[debug] [2026-07-01T03:24:39.460Z] Checked if tokens are valid: true, expires at: 1782879663827
+[debug] [2026-07-01T03:24:39.460Z] >>> [apiv2][query] GET https://firebase.googleapis.com/v1beta1/projects/water-heater-sensors/adminSdkConfig [none]
+[debug] [2026-07-01T03:24:39.740Z] <<< [apiv2][status] GET https://firebase.googleapis.com/v1beta1/projects/water-heater-sensors/adminSdkConfig 200
+[debug] [2026-07-01T03:24:39.740Z] <<< [apiv2][body] GET https://firebase.googleapis.com/v1beta1/projects/water-heater-sensors/adminSdkConfig {"projectId":"water-heater-sensors","databaseURL":"https://water-heater-sensors-default-rtdb.firebaseio.com","storageBucket":"water-heater-sensors.firebasestorage.app"}
+[debug] [2026-07-01T03:24:39.746Z] Validating nodejs source
+[debug] [2026-07-01T03:24:40.986Z] > [functions] package.json contents: {
+  "name": "functions",
+  "description": "Cloud Functions for Firebase",
+  "scripts": {
+    "serve": "firebase emulators:start --only functions",
+    "shell": "firebase functions:shell",
+    "start": "npm run shell",
+    "deploy": "firebase deploy --only functions",
+    "logs": "firebase functions:log"
+  },
+  "engines": {
+    "node": "24"
+  },
+  "main": "index.js",
+  "dependencies": {
+    "firebase-admin": "^13.6.0",
+    "firebase-functions": "^7.0.0"
+  },
+  "devDependencies": {
+    "firebase-functions-test": "^3.4.1"
+  },
+  "private": true
+}
+[debug] [2026-07-01T03:24:40.986Z] Building nodejs source
+[info] i  functions: Loading and analyzing source code for codebase default to determine what to deploy 
+[debug] [2026-07-01T03:24:40.987Z] Could not find functions.yaml. Must use http discovery
+[debug] [2026-07-01T03:24:41.010Z] Found firebase-functions binary at 'I:\Projects\pool-heater-monitor\functions\node_modules\.bin\firebase-functions'

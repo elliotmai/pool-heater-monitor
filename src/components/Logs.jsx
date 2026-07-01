@@ -33,17 +33,17 @@ const LogItem = ({ log }) => {
   });
 
   return (
-    <Card 
-      sx={{ 
+    <Card
+      sx={{
         mb: 1,
         boxShadow: '0 1px 2px rgba(0, 0, 0, 0.05)',
         border: '1px solid rgba(0, 0, 0, 0.05)'
       }}
     >
       <CardContent sx={{ display: 'flex', gap: 1.5, p: 1.5, '&:last-child': { pb: 1.5 } }}>
-        <Avatar 
-          sx={{ 
-            width: 32, 
+        <Avatar
+          sx={{
+            width: 32,
             height: 32,
             bgcolor: getLogColor(log.level),
             borderRadius: 1
@@ -52,9 +52,9 @@ const LogItem = ({ log }) => {
           {getLogIcon(log.level)}
         </Avatar>
         <Box sx={{ flex: 1 }}>
-          <Typography 
-            variant="caption" 
-            sx={{ 
+          <Typography
+            variant="caption"
+            sx={{
               fontSize: '11px',
               color: '#8e8e93',
               display: 'block',
@@ -63,9 +63,9 @@ const LogItem = ({ log }) => {
           >
             {time}
           </Typography>
-          <Typography 
-            variant="body2" 
-            sx={{ 
+          <Typography
+            variant="body2"
+            sx={{
               fontSize: '14px',
               color: '#1c1c1e',
               lineHeight: 1.4
@@ -82,7 +82,7 @@ const LogItem = ({ log }) => {
 const Logs = ({ logs }) => {
   const [searchQuery, setSearchQuery] = useState('');
   const [levelFilter, setLevelFilter] = useState('all');
-  const [timeFilter, setTimeFilter] = useState('1h');
+  const [timeFilter, setTimeFilter] = useState('7d');
 
   const handleLevelFilterChange = (event, newFilter) => {
     if (newFilter !== null) {
@@ -104,14 +104,14 @@ const Logs = ({ logs }) => {
 
     // Filter by search query
     if (searchQuery.trim()) {
-      filtered = filtered.filter(log => 
+      filtered = filtered.filter(log =>
         log.message.toLowerCase().includes(searchQuery.toLowerCase())
       );
     }
 
     // Filter by level
     if (levelFilter !== 'all') {
-      filtered = filtered.filter(log => 
+      filtered = filtered.filter(log =>
         log.level.toUpperCase() === levelFilter.toUpperCase()
       );
     }
@@ -135,7 +135,7 @@ const Logs = ({ logs }) => {
           hoursAgo = 24 * 7;
           break;
         default:
-          hoursAgo = 1;
+          hoursAgo = 24;
       }
 
       if (hoursAgo) {
@@ -152,8 +152,8 @@ const Logs = ({ logs }) => {
 
   if (!logs || logs.length === 0) {
     return (
-      <Box 
-        sx={{ 
+      <Box
+        sx={{
           display: 'flex',
           flexDirection: 'column',
           alignItems: 'center',
@@ -261,9 +261,9 @@ const Logs = ({ logs }) => {
       </Box>
 
       {/* Results Count */}
-      <Typography 
-        variant="caption" 
-        sx={{ 
+      <Typography
+        variant="caption"
+        sx={{
           display: 'block',
           textAlign: 'center',
           color: '#8e8e93',
@@ -280,8 +280,8 @@ const Logs = ({ logs }) => {
           <LogItem key={index} log={log} />
         ))
       ) : (
-        <Box 
-          sx={{ 
+        <Box
+          sx={{
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',

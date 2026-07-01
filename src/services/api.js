@@ -202,7 +202,7 @@ export const fetchHistoricalData = async (targetDate = new Date()) => {
     ]);
     
     if (!sensorsSnapshot.exists()) {
-      throw new Error('Failed to fetch historical data');
+      return []; // no readings yet — return empty instead of throwing (would blank weather+logs too)
     }
     
     const sensorsData = sensorsSnapshot.val();
@@ -267,7 +267,7 @@ export const fetchHistoricalData = async (targetDate = new Date()) => {
     return [];
   } catch (error) {
     console.error('Error fetching historical data:', error);
-    throw error;
+    return [];
   }
 };
 
@@ -286,22 +286,11 @@ export const fetchLogs = async () => {
     if (!snapshot.exists()) return [];
 
     const data = snapshot.val();
+    if (!data) return [];
 
-    if (data) {
-      const fiveDaysAgo = new Date();
-      fiveDaysAgo.setDate(fiveDaysAgo.getDate() - 5);
-      const cutoffTime = fiveDaysAgo.getTime();
-
-      return Object.values(data)
-        .filter(log => {
-          if (!log.timestamp) return false;
-          if (new Date(log.timestamp).getTime() < cutoffTime) return false;
-          const level = (log.level || '').toUpperCase();
-          return level === 'ERROR' || level === 'WARNING';
-        })
-        .sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-    }
-    return [];
+    return Object.values(data)
+      .filter(log => log && log.timestamp)                              // keep entries that have a timestamp
+      .sort((a, b) => (b.unix_timestamp || 0) - (a.unix_timestamp || 0)); // newest first, by unix_timestamp
   } catch (error) {
     console.error('Logs fetch error:', error);
     return [];
@@ -316,25 +305,21 @@ export const fetchWeatherHistory = async () => {
     const weatherQuery = query(
       ref(database, 'water-heater-user/weather_history'),
       orderByKey(),
-      limitToLast(1500)
+      limitToLast(5000)
     );
     const snapshot = await get(weatherQuery);
 
     if (!snapshot.exists()) return [];
 
     const data = snapshot.val();
+    if (!data) return [];
 
-    if (data) {
-      const fiveDaysAgoUnix = Math.floor(Date.now() / 1000) - 5 * 24 * 60 * 60;
-      return Object.values(data)
-        .filter(w => (w.unix_timestamp || 0) >= fiveDaysAgoUnix)
-        .sort((a, b) => a.unix_timestamp - b.unix_timestamp)
-        .map(weather => ({
-          ...weather,
-          timestamp: weather.timestamp || new Date(weather.unix_timestamp * 1000).toISOString()
-        }));
-    }
-    return [];
+    return Object.values(data)
+      .sort((a, b) => (a.unix_timestamp || 0) - (b.unix_timestamp || 0))
+      .map(weather => ({
+        ...weather,
+        timestamp: weather.timestamp || new Date(weather.unix_timestamp * 1000).toISOString()
+      }));
   } catch (error) {
     console.error('Weather history fetch error:', error);
     return [];
@@ -364,11 +349,18 @@ export const fetchInitialData = async () => {
  * Runs after fetchInitialData so the Overview is already visible.
  */
 export const fetchBackgroundData = async (targetDate) => {
-  const [historical, weatherHistory, logs] = await Promise.all([
+  // allSettled (not all): if one fetch fails, keep the others instead of
+  // discarding everything.
+  const results = await Promise.allSettled([
     fetchHistoricalData(targetDate),
     fetchWeatherHistory(),
     fetchLogs()
   ]);
+  const val = (r) => (r.status === 'fulfilled' ? r.value : []);
 
-  return { historical, weatherHistory, logs };
+  return {
+    historical: val(results[0]),
+    weatherHistory: val(results[1]),
+    logs: val(results[2]),
+  };
 };
