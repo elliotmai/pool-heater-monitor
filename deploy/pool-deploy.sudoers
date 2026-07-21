@@ -1,0 +1,4 @@
+# Install to /etc/sudoers.d/pool-deploy (mode 0440, root:root).
+# Lets the pi user restart ONLY the pool monitor without a password, so the
+# automated deploy timer can apply updates non-interactively. Nothing else.
+pi ALL=(ALL) NOPASSWD: /usr/bin/systemctl restart pool-monitor.service, /bin/systemctl restart pool-monitor.service

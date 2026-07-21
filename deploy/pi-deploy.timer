@@ -1,0 +1,13 @@
+[Unit]
+Description=Check the repo and deploy pool-heater-monitor updates every minute
+
+[Timer]
+# First run 1 min after boot, then every minute while running.
+OnBootSec=1min
+OnUnitActiveSec=1min
+# If the Pi was off when a run was due, run once on next boot.
+Persistent=true
+Unit=pi-deploy.service
+
+[Install]
+WantedBy=timers.target

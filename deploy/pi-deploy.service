@@ -1,0 +1,9 @@
+[Unit]
+Description=Pull latest pool-heater-monitor files and deploy to Desktop
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=pi
+ExecStart=/home/pi/pool-heater-monitor/deploy/deploy.sh

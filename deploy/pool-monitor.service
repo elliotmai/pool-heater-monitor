@@ -1,0 +1,19 @@
+[Unit]
+Description=Pool Heater Monitor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+# Corrected path: the script lives in ~/Desktop, not directly in ~
+ExecStart=/usr/bin/python3 /home/pi/Desktop/pool_monitor.py
+WorkingDirectory=/home/pi/Desktop
+User=pi
+Restart=always
+# Wait 5s between restarts so a crash loop doesn't trip the start limit
+RestartSec=5
+Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+StandardOutput=inherit
+StandardError=inherit
+
+[Install]
+WantedBy=multi-user.target
