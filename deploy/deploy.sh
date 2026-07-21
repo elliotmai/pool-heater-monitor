@@ -23,15 +23,21 @@ BRANCH="main"
 FORCE="${1:-}"
 
 cd "$REPO_DIR"
-git fetch --quiet origin "$BRANCH"
 
+# Cheapest possible poll: ls-remote lists the remote ref hash WITHOUT
+# downloading any git objects. When nothing changed (the common case) we do
+# zero object transfer and exit — negligible load on the Pi.
 LOCAL="$(git rev-parse HEAD)"
-REMOTE="$(git rev-parse "origin/$BRANCH")"
+REMOTE="$(git ls-remote origin "$BRANCH" | awk '{print $1}')"
 
 # Up to date and not forced -> nothing to do.
 if [ "$LOCAL" = "$REMOTE" ] && [ "$FORCE" != "--force" ]; then
     exit 0
 fi
+
+# Something changed (or forced): now actually download the new objects.
+git fetch --quiet origin "$BRANCH"
+REMOTE="$(git rev-parse "origin/$BRANCH")"
 
 # Determine whether pi-files/ changed BEFORE we move HEAD.
 PI_CHANGED="$(git diff --name-only "$LOCAL" "$REMOTE" -- pi-files/ || true)"

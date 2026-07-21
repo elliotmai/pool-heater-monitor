@@ -2,9 +2,10 @@
 Description=Check the repo and deploy pool-heater-monitor updates every minute
 
 [Timer]
-# First run 1 min after boot, then every minute while running.
-OnBootSec=1min
-OnUnitActiveSec=1min
+# First run 2 min after boot, then every 5 min. Bump OnUnitActiveSec up/down
+# to trade responsiveness for load (the poll itself is very light either way).
+OnBootSec=2min
+OnUnitActiveSec=5min
 # If the Pi was off when a run was due, run once on next boot.
 Persistent=true
 Unit=pi-deploy.service
