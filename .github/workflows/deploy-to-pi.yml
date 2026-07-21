@@ -1,0 +1,42 @@
+name: Deploy files to Pi
+
+# Runs on the self-hosted runner installed on the Raspberry Pi.
+# On every push that touches pi-files/, it copies those files into place
+# on the Pi. Also triggerable manually from the Actions tab.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'pi-files/**'
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    # The label(s) of the self-hosted runner on the Pi.
+    # `self-hosted` matches any self-hosted runner registered to this repo.
+    runs-on: self-hosted
+
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Sync pi-files/ to the Pi
+        run: |
+          set -euo pipefail
+          # Destination on the Pi. Assumes the runner runs as the `pi` user
+          # (so $HOME = /home/pi/Desktop). Change if your username differs.
+          DEST="$HOME/Desktop"
+          echo "Deploying pi-files/ -> $DEST"
+          mkdir -p "$DEST"
+
+          # Copy contents of pi-files/ into $DEST, preserving permissions
+          # (keeps the executable bit on .sh / .py files).
+          # --exclude keeps the Firebase key untouched; no --delete so any
+          # existing files on the Pi (like the key) are left in place.
+          rsync -av \
+            --exclude='*firebase-adminsdk*.json' \
+            pi-files/ "$DEST/"
+
+          echo "Done. Current $DEST contents:"
+          ls -la "$DEST"

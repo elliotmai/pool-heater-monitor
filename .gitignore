@@ -22,3 +22,7 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 /scripts
+
+# Firebase service account key - SECRET, never commit. Lives only on the Pi.
+pi-files/water-heater-sensors-firebase-adminsdk-*.json
+pi-files/*firebase-adminsdk*.json
