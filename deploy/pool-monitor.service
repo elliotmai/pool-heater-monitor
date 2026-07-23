@@ -11,6 +11,10 @@ User=pi
 Restart=always
 # Wait 5s between restarts so a crash loop doesn't trip the start limit
 RestartSec=5
+# Safety net: fully restart the process once every 24h so any slow resource
+# leak (memory, USB/SDR handles) can't accumulate. Restart=always brings it
+# straight back. This restarts ONLY this process, not the whole Pi.
+RuntimeMaxSec=86400
 Environment=PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 StandardOutput=inherit
 StandardError=inherit

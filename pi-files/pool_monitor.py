@@ -39,6 +39,28 @@ def log_to_db(level, message):
         print(f"[{level}] {message}")
         print(f"(Failed to log to Firebase: {e})")
 
+# --- Throttled logging -------------------------------------------------------
+# A persistent problem (e.g. sensors unplugged) used to write an identical error
+# to Firebase every single cycle, filling up the logs. These throttles keep at
+# most one copy per interval so the database isn't spammed with duplicates.
+ERROR_LOG_THROTTLE = 3600     # seconds between repeats of an identical error
+SUCCESS_LOG_THROTTLE = 3600   # seconds between "cycle ok" heartbeat logs
+_last_logged = {}
+
+def log_to_db_throttled(level, message, throttle_secs=ERROR_LOG_THROTTLE):
+    """Like log_to_db, but suppress an identical message within throttle_secs.
+
+    The message still prints to the console (captured by journald) every time;
+    only the Firebase write is skipped, so the DB isn't filled with duplicates.
+    """
+    now = time.time()
+    last = _last_logged.get(message, 0)
+    if now - last < throttle_secs:
+        print(f"[{level}] {message} (throttled, not re-sent to DB)")
+        return
+    _last_logged[message] = now
+    log_to_db(level, message)
+
 # Load sensor mappings from JSON file
 def load_sensor_mappings():
     """Load sensor name mappings from sensors.json"""
@@ -135,7 +157,7 @@ def read_rtl433_sensors(duration=30):
         print(f'[INFO] Starting RTL-SDR scan for {duration} seconds (filtering for Oria sensors)...')
         
         # Find rtl_433 executable
-        rtl_path = None
+        rtl433_path = None
         possible_paths = [
             '/home/pi/rtl_433/build/src/rtl_433',
             '/usr/local/bin/rtl_433',
@@ -422,10 +444,12 @@ def log_weather_to_firebase(location, weather_data):
         print(f'[ERROR] Failed to log weather to Firebase: {e}')
         return False
 
-def log_to_firebase(ds18b20_readings, rf_readings):
+def log_to_firebase(ds18b20_readings, rf_readings, weather_info=None):
     """Log all sensor data to Firebase Realtime Database with timestamp as document name
-   
-    Both DS18B20 and RF sensors are stored in the same flat structure with sensor names as keys
+
+    Both DS18B20 and RF sensors are stored in the same flat structure with sensor names as keys.
+    The outside weather (if available) is embedded in the same record so every reading
+    captures the ambient conditions at the moment it was taken.
     """
     try:
         # Reference to your database
@@ -448,7 +472,16 @@ def log_to_firebase(ds18b20_readings, rf_readings):
         # Add RF sensor readings directly (using sensor name as key, temp as value)
         for sensor_name, sensor_data in rf_readings.items():
             data[sensor_name] = sensor_data['temperature_c']
-       
+
+        # Embed the outside weather alongside the sensor readings so every
+        # record captures ambient conditions at the moment of the read.
+        if weather_info and weather_info.get('weather'):
+            w = weather_info['weather']
+            data['outside_temp_f'] = w.get('temp_f')
+            data['outside_temp_c'] = w.get('temp_c')
+            data['outside_humidity'] = w.get('humidity')
+            data['outside_conditions'] = w.get('description')
+
         # Store with unix timestamp as the document name
         readings_ref = ref.child('readings').child(str(unix_timestamp))
         readings_ref.set(data)
@@ -538,15 +571,21 @@ def display_readings(ds18b20_readings, rf_readings, weather_info=None):
     print(f"{'='*60}")
 
 def main():
-    """Main loop - read sensors and weather every 5 minutes"""
-    RUNTIME = 300 # Write to db every 5 minutes
-    INTERVAL = 0 # Time between runs
-    RTL_SCAN_DURATION =  RUNTIME - INTERVAL # Lenght of RTL Scan
+    """Main loop - read sensors and weather roughly every CYCLE_TARGET seconds"""
+    CYCLE_TARGET = 300         # Aim for one full cycle every ~5 minutes
+    RTL_SCAN_DURATION = 120    # Seconds to listen for RF sensors each cycle.
+                               # Shorter = lighter load (the SDR idles the rest
+                               # of the cycle instead of running non-stop). Raise
+                               # it toward CYCLE_TARGET if RF (Oria) readings
+                               # start getting missed.
+    MIN_LOOP_GAP = 5           # Hard floor between cycles (never busy-loop)
+    FAILURE_BACKOFF = 60       # Extra cooldown added per consecutive failure
+    MAX_FAILURE_BACKOFF = 900  # ...capped at 15 minutes
    
     print("\n" + "="*60)
     print("MULTI-SENSOR POOL HEATER MONITOR")
     print("="*60)
-    print(f"Logging interval: {INTERVAL} seconds ({INTERVAL/60:.0f} minutes)")
+    print(f"Cycle target: {CYCLE_TARGET} seconds ({CYCLE_TARGET/60:.0f} minutes)")
     print(f"RF scan duration: {RTL_SCAN_DURATION} seconds per cycle")
     print(f"Firebase project: water-heater-sensors")
     print(f"Weather source: weather.gov")
@@ -580,8 +619,11 @@ def main():
    
     print("\nStarting monitoring loop...")
     print("Press Ctrl+C to stop\n")
-   
+
+    consecutive_failures = 0  # Drives the post-failure back-off
+
     while True:
+        cycle_start = time.time()
         cycle_errors = []  # Track errors for this cycle
        
         try:
@@ -622,7 +664,7 @@ def main():
             # Step 4: Log sensors to Firebase (continue even if it fails)
             try:
                 if ds18b20_readings or rf_readings:
-                    log_to_firebase(ds18b20_readings, rf_readings)
+                    log_to_firebase(ds18b20_readings, rf_readings, weather_info)
                 elif rf_nonweather:
                     log_nonweather_to_firebase(rf_nonweather)
                     
@@ -645,19 +687,31 @@ def main():
                 cycle_errors.append(error_msg)
                 print(f"[ERROR] {error_msg}")
            
-            # Write cycle summary log to Firebase
+            # Write cycle summary log to Firebase (throttled so a persistent
+            # problem doesn't write an identical error every single cycle).
             if cycle_errors:
-                # Log the specific errors that occurred
+                consecutive_failures += 1
                 error_summary = "; ".join(cycle_errors)
-                log_to_db('ERROR', f"Cycle completed with errors: {error_summary}")
+                log_to_db_throttled('ERROR', f"Cycle completed with errors: {error_summary}",
+                                    throttle_secs=ERROR_LOG_THROTTLE)
             else:
-                # Log success
-                log_to_db('INFO', 'Cycle completed successfully')
+                if consecutive_failures > 0:
+                    # Note recovery once, immediately (not throttled).
+                    log_to_db('INFO', f'Recovered after {consecutive_failures} failed cycle(s)')
+                consecutive_failures = 0
+                log_to_db_throttled('INFO', 'Cycle completed successfully',
+                                    throttle_secs=SUCCESS_LOG_THROTTLE)
            
-            print(f"\nNext reading in {INTERVAL} seconds...")
-           
-            # Wait for next interval
-            time.sleep(INTERVAL)
+            # Pace the loop. A healthy RF scan already used most of CYCLE_TARGET,
+            # so we sleep the small remainder. If reads failed fast, we sleep the
+            # full remainder plus a growing back-off, so failures never busy-loop
+            # and hammer Firebase (the root cause of the ~24h bog-down).
+            elapsed = time.time() - cycle_start
+            backoff = min(FAILURE_BACKOFF * consecutive_failures, MAX_FAILURE_BACKOFF) if consecutive_failures else 0
+            sleep_time = max(MIN_LOOP_GAP, CYCLE_TARGET - elapsed, backoff)
+
+            print(f"\nNext reading in {int(sleep_time)} seconds...")
+            time.sleep(sleep_time)
            
         except KeyboardInterrupt:
             log_to_db('INFO', 'House Weather Monitor stopped by user')
