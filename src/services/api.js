@@ -5,16 +5,45 @@ import {
   update,
   query,
   orderByKey,
+  startAt,
   limitToLast } from 'firebase/database';
 import { database } from '../config/firebase';
+
+const BASE = 'water-heater-user';
 
 /**
  * Convert Celsius to Fahrenheit
  */
 const celsiusToFahrenheit = (celsius) => {
   if (celsius === null || celsius === undefined) return null;
-  return (celsius * 9/5) + 32;
+  return (celsius * 9 / 5) + 32;
 };
+
+/**
+ * Time ranges the dashboard can display. Each maps to the tier that holds the
+ * right resolution for that span, so a query never pulls more than a few
+ * hundred points:
+ *   raw    → 5-min points   (readings_raw)
+ *   hourly → hourly summary (readings_hourly)
+ *   daily  → daily summary  (readings_daily)
+ */
+export const RANGES = {
+  '24h': { seconds: 86400, tier: 'raw' },
+  '7d': { seconds: 7 * 86400, tier: 'raw' },
+  '30d': { seconds: 30 * 86400, tier: 'hourly' },
+  '6mo': { seconds: 182 * 86400, tier: 'daily' },
+  '1y': { seconds: 365 * 86400, tier: 'daily' },
+};
+
+const TIER_PATH = {
+  raw: `${BASE}/readings_raw`,
+  hourly: `${BASE}/readings_hourly`,
+  daily: `${BASE}/readings_daily`,
+};
+
+const META_KEYS = new Set(['timestamp', 'unix_timestamp', 'bucket_start', 'bucket_end', 'count']);
+
+// ─────────────────────────── Sensor config ───────────────────────────
 
 /**
  * Fetch sensor configuration from Firebase
@@ -22,25 +51,27 @@ const celsiusToFahrenheit = (celsius) => {
  */
 export const fetchSensorConfig = async () => {
   try {
-    const sensorsRef = ref(database, 'water-heater-user/sensors');
+    const sensorsRef = ref(database, `${BASE}/sensors`);
     const snapshot = await get(sensorsRef);
-    
+
     if (!snapshot.exists()) {
       return {};
     }
-    
+
     const sensorsData = snapshot.val();
-    
-    // Transform to the format expected by the app
+
     const sensorConfig = {};
     Object.entries(sensorsData).forEach(([sensorId, config]) => {
       sensorConfig[sensorId] = {
         displayName: config.displayName || sensorId,
         color: config.color || '#007aff',
-        enabled: config.alive !== false // Use 'alive' from DB as 'enabled' in app
+        enabled: config.alive !== false, // Use 'alive' from DB as 'enabled' in app
+        location: config.location || null,
+        status: config.status || 'online',
+        lastSeen: config.lastSeen || null,
       };
     });
-    
+
     return sensorConfig;
   } catch (error) {
     console.error('Error fetching sensor config:', error);
@@ -53,15 +84,15 @@ export const fetchSensorConfig = async () => {
  */
 export const updateSensorConfig = async (sensorId, config) => {
   try {
-    const sensorRef = ref(database, `water-heater-user/sensors/${sensorId}`);
-    
-    // Map app's 'enabled' to DB's 'alive'
-    const dbConfig = {
-      displayName: config.displayName,
-      color: config.color,
-      alive: config.enabled !== false
-    };
-    
+    const sensorRef = ref(database, `${BASE}/sensors/${sensorId}`);
+
+    // Map app's 'enabled' to DB's 'alive'. Only include fields that were passed.
+    const dbConfig = {};
+    if (config.displayName !== undefined) dbConfig.displayName = config.displayName;
+    if (config.color !== undefined) dbConfig.color = config.color;
+    if (config.enabled !== undefined) dbConfig.alive = config.enabled !== false;
+    if (config.location !== undefined) dbConfig.location = config.location;
+
     await update(sensorRef, dbConfig);
     return true;
   } catch (error) {
@@ -75,14 +106,15 @@ export const updateSensorConfig = async (sensorId, config) => {
  */
 export const createSensorConfig = async (sensorId, config) => {
   try {
-    const sensorRef = ref(database, `water-heater-user/sensors/${sensorId}`);
-    
+    const sensorRef = ref(database, `${BASE}/sensors/${sensorId}`);
+
     const dbConfig = {
       displayName: config.displayName || sensorId,
       color: config.color || '#007aff',
-      alive: config.enabled !== false
+      alive: config.enabled !== false,
+      location: config.location || null,
     };
-    
+
     await set(sensorRef, dbConfig);
     return true;
   } catch (error) {
@@ -92,16 +124,19 @@ export const createSensorConfig = async (sensorId, config) => {
 };
 
 /**
- * Discover sensors from Firebase data and ensure they exist in sensor config
- * Auto-creates sensor config entries for any new sensors found in readings
+ * Is this a data key that represents a sensor (vs metadata or outside weather)?
+ */
+const isSensorKey = (key, value) =>
+  typeof value === 'number' && !META_KEYS.has(key) && !key.startsWith('outside_');
+
+/**
+ * Discover sensors from a reading and ensure they exist in sensor config.
+ * Auto-creates config entries for any new sensor names found.
  */
 const discoverAndEnsureSensors = async (firebaseData, currentSensorConfig) => {
   if (!firebaseData) return currentSensorConfig;
 
-  const excludedKeys = ['timestamp', 'unix_timestamp', 'weather'];
-  const sensorKeys = Object.keys(firebaseData).filter(
-    key => !excludedKeys.includes(key) && typeof firebaseData[key] === 'number'
-  );
+  const sensorKeys = Object.keys(firebaseData).filter(key => isSensorKey(key, firebaseData[key]));
 
   const DEFAULT_COLORS = [
     '#007aff', '#ff3b30', '#ffcc00', '#34c759', '#8e44ad',
@@ -112,7 +147,6 @@ const discoverAndEnsureSensors = async (firebaseData, currentSensorConfig) => {
   const newSensorConfig = { ...currentSensorConfig };
   let colorIndex = Object.keys(currentSensorConfig).length;
 
-  // Check for sensors that don't have config entries
   for (const sensorKey of sensorKeys) {
     if (!currentSensorConfig[sensorKey]) {
       hasNewSensors = true;
@@ -121,12 +155,8 @@ const discoverAndEnsureSensors = async (firebaseData, currentSensorConfig) => {
         color: DEFAULT_COLORS[colorIndex % DEFAULT_COLORS.length],
         enabled: true
       };
-      
       newSensorConfig[sensorKey] = config;
-      
-      // Create the sensor config in Firebase
       await createSensorConfig(sensorKey, config);
-      
       colorIndex++;
     }
   }
@@ -134,48 +164,43 @@ const discoverAndEnsureSensors = async (firebaseData, currentSensorConfig) => {
   return hasNewSensors ? newSensorConfig : currentSensorConfig;
 };
 
+// ─────────────────────────── Latest snapshot ───────────────────────────
+
 /**
- * Fetch the latest sensor readings from Firebase
+ * Fetch the latest sensor snapshot (the 'live' node) plus the most recent
+ * rich weather record (which carries location + icon for the Overview card).
  */
 export const fetchLatestData = async () => {
   try {
-    const latestRef = ref(database, 'water-heater-user/latest');
-    const weatherHistoryRef = ref(database, 'water-heater-user/weather_history');
-    
-    const [sensorsSnapshot, weatherSnapshot] = await Promise.all([
-      get(latestRef),
-      get(weatherHistoryRef)
-    ]);
-    
-    if (!sensorsSnapshot.exists()) {
+    const liveRef = ref(database, `${BASE}/live`);
+    const weatherQuery = query(ref(database, `${BASE}/weather_history`), orderByKey(), limitToLast(1));
+
+    const [liveSnapshot, weatherSnapshot] = await Promise.all([get(liveRef), get(weatherQuery)]);
+
+    if (!liveSnapshot.exists()) {
       throw new Error('Failed to fetch latest data');
     }
-    
-    const sensorsData = sensorsSnapshot.val();
-    const weatherData = weatherSnapshot.exists() ? weatherSnapshot.val() : null;
-    
-    // Get the latest weather reading
+
+    const live = liveSnapshot.val();
+
+    // Latest rich weather (for the Overview weather card).
     let latestWeather = null;
-    if (weatherData) {
-      const weatherArray = Object.values(weatherData)
-        .sort((a, b) => b.unix_timestamp - a.unix_timestamp);
-      if (weatherArray.length > 0) {
-        latestWeather = weatherArray[0];
-      }
+    if (weatherSnapshot.exists()) {
+      const vals = Object.values(weatherSnapshot.val());
+      latestWeather = vals[vals.length - 1] || null;
     }
-    
-    // Convert all temperatures to Fahrenheit
+
+    // Sensor values are stored in °C — convert to °F for display.
     const converted = {
-      timestamp: sensorsData.timestamp,
-      unix_timestamp: sensorsData.unix_timestamp,
+      timestamp: live.timestamp,
+      unix_timestamp: live.unix_timestamp,
     };
-    
-    Object.keys(sensorsData).forEach(key => {
-      if (typeof sensorsData[key] === 'number' && key !== 'unix_timestamp') {
-        converted[key] = celsiusToFahrenheit(sensorsData[key]);
+    Object.keys(live).forEach(key => {
+      if (isSensorKey(key, live[key])) {
+        converted[key] = celsiusToFahrenheit(live[key]);
       }
     });
-    
+
     converted.weather = latestWeather;
     return converted;
   } catch (error) {
@@ -184,113 +209,100 @@ export const fetchLatestData = async () => {
   }
 };
 
+// ─────────────────────────── Historical (tiered) ───────────────────────────
+
+const labelFor = (unixSec, range) => {
+  const d = new Date(unixSec * 1000);
+  if (range === '24h') return d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' });
+  if (range === '7d') return d.toLocaleString('en-US', { weekday: 'short', hour: '2-digit', minute: '2-digit' });
+  if (range === '30d') return d.toLocaleString('en-US', { month: 'numeric', day: 'numeric', hour: '2-digit' });
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric' }); // 6mo / 1y
+};
+
+/** Normalize a raw 5-min reading into a flat °F chart row. */
+const normalizeRaw = (reading, range) => {
+  const row = {
+    time: labelFor(reading.unix_timestamp, range),
+    timestamp: reading.timestamp,
+    unix_timestamp: reading.unix_timestamp,
+    outdoor_temp: reading.outside_temp_f ?? null,
+    outdoor_humidity: reading.outside_humidity ?? null,
+    weather_description: reading.outside_conditions ?? null,
+  };
+  Object.keys(reading).forEach(key => {
+    if (isSensorKey(key, reading[key])) row[key] = celsiusToFahrenheit(reading[key]);
+  });
+  return row;
+};
+
+/** Normalize an hourly/daily rollup bucket into the same flat °F chart row.
+ *  Uses the average as the line value and also exposes _min/_max for bands. */
+const normalizeBucket = (bucket, range) => {
+  const outside = bucket.outside || {};
+  const row = {
+    time: labelFor(bucket.unix_timestamp, range),
+    timestamp: new Date(bucket.unix_timestamp * 1000).toISOString(),
+    unix_timestamp: bucket.unix_timestamp,
+    // outside_* were stored already in °F (temp_f) — no conversion.
+    outdoor_temp: outside.temp_f?.avg ?? null,
+    outdoor_humidity: outside.humidity?.avg ?? null,
+    weather_description: outside.conditions_last ?? null,
+  };
+  Object.entries(bucket.sensors || {}).forEach(([name, agg]) => {
+    if (!agg || typeof agg.avg !== 'number') return;
+    row[name] = celsiusToFahrenheit(agg.avg);
+    row[`${name}_min`] = celsiusToFahrenheit(agg.min);
+    row[`${name}_max`] = celsiusToFahrenheit(agg.max);
+  });
+  return row;
+};
+
 /**
- * Fetch historical sensor readings with merged weather data
+ * Fetch historical readings for a range, reading from the tier that holds the
+ * right resolution and bounding the query by time (never downloads everything).
+ * Returns flat, °F, chart-ready rows sorted oldest→newest.
  */
-export const fetchHistoricalData = async (targetDate = new Date()) => {
+export const fetchHistoricalData = async (range = '24h') => {
   try {
-    const readingsRef = ref(database, 'water-heater-user/readings');
-    const weatherQuery = query(
-      ref(database, 'water-heater-user/weather_history'),
+    const cfg = RANGES[range] || RANGES['24h'];
+    const cutoffSec = Math.floor(Date.now() / 1000) - cfg.seconds;
+
+    const tierQuery = query(
+      ref(database, TIER_PATH[cfg.tier]),
       orderByKey(),
-      limitToLast(500)
+      startAt(String(cutoffSec)),
     );
+    const snapshot = await get(tierQuery);
+    if (!snapshot.exists()) return [];
 
-    const [sensorsSnapshot, weatherSnapshot] = await Promise.all([
-      get(readingsRef),
-      get(weatherQuery)
-    ]);
-    
-    if (!sensorsSnapshot.exists()) {
-      return []; // no readings yet — return empty instead of throwing (would blank weather+logs too)
-    }
-    
-    const sensorsData = sensorsSnapshot.val();
-    const weatherData = weatherSnapshot.exists() ? weatherSnapshot.val() : null;
-    
-    // Create a map of weather data by timestamp
-    const weatherMap = {};
-    if (weatherData) {
-      Object.values(weatherData).forEach(weather => {
-        weatherMap[weather.unix_timestamp] = weather;
-      });
-    }
-    
-    if (sensorsData) {
-      // Load ALL readings and sort by unix_timestamp
-      const readings = Object.values(sensorsData)
-        .filter(reading => reading.unix_timestamp)
-        .sort((a, b) => (a.unix_timestamp || 0) - (b.unix_timestamp || 0))
-        .map(reading => {
-          const date = new Date(reading.timestamp);
-          const time = date.toLocaleTimeString('en-US', { 
-            hour: '2-digit', 
-            minute: '2-digit' 
-          });
-
-          // Find matching weather data (within 5 minutes)
-          let matchingWeather = weatherMap[reading.unix_timestamp];
-          if (!matchingWeather) {
-            const timestamps = Object.keys(weatherMap).map(Number);
-            const closest = timestamps.find(t => 
-              Math.abs(t - reading.unix_timestamp) <= 300
-            );
-            if (closest) {
-              matchingWeather = weatherMap[closest];
-            }
-          }
-          
-          // Build base result object
-          const result = {
-            time,
-            timestamp: reading.timestamp,
-            unix_timestamp: reading.unix_timestamp,
-          };
-
-          // Convert all numeric sensor values to Fahrenheit
-          Object.keys(reading).forEach(key => {
-            if (typeof reading[key] === 'number' && key !== 'unix_timestamp') {
-              result[key] = celsiusToFahrenheit(reading[key]);
-            }
-          });
-
-          // Add weather data
-          result.outdoor_temp = matchingWeather?.temp_f || null;
-          result.outdoor_humidity = matchingWeather?.humidity || null;
-          result.weather_description = matchingWeather?.description || null;
-
-          return result;
-        });
-
-      return readings;
-    }
-    return [];
+    const normalize = cfg.tier === 'raw' ? normalizeRaw : normalizeBucket;
+    return Object.values(snapshot.val())
+      .filter(r => r && r.unix_timestamp)
+      .sort((a, b) => (a.unix_timestamp || 0) - (b.unix_timestamp || 0))
+      .map(r => normalize(r, range));
   } catch (error) {
     console.error('Error fetching historical data:', error);
     return [];
   }
 };
 
+// ─────────────────────────── Logs & events ───────────────────────────
+
 /**
- * Fetch system logs from Firebase
+ * Fetch system logs — merges the info tier (`logs`) and the longer-retained
+ * error tier (`logs_errors`) into one newest-first list.
  */
 export const fetchLogs = async () => {
   try {
-    const logsQuery = query(
-      ref(database, 'water-heater-user/logs'),
-      orderByKey(),
-      limitToLast(2000)
-    );
-    const snapshot = await get(logsQuery);
+    const mk = (node) => query(ref(database, `${BASE}/${node}`), orderByKey(), limitToLast(1000));
+    const [infoSnap, errSnap] = await Promise.all([get(mk('logs')), get(mk('logs_errors'))]);
 
-    if (!snapshot.exists()) return [];
+    const collect = (snap) => (snap.exists() ? Object.values(snap.val()) : []);
+    const all = [...collect(infoSnap), ...collect(errSnap)];
 
-    const data = snapshot.val();
-    if (!data) return [];
-
-    return Object.values(data)
-      .filter(log => log && log.timestamp)                              // keep entries that have a timestamp
-      .sort((a, b) => (b.unix_timestamp || 0) - (a.unix_timestamp || 0)); // newest first, by unix_timestamp
+    return all
+      .filter(log => log && log.timestamp)
+      .sort((a, b) => (b.unix_timestamp || 0) - (a.unix_timestamp || 0)); // newest first
   } catch (error) {
     console.error('Logs fetch error:', error);
     return [];
@@ -298,69 +310,79 @@ export const fetchLogs = async () => {
 };
 
 /**
- * Fetch weather history from Firebase
+ * Fetch sensor lifecycle events (moved, renamed, offline, online, …), newest
+ * first. Optionally filter to a single sensor.
  */
-export const fetchWeatherHistory = async () => {
+export const fetchSensorEvents = async (sensorId = null) => {
   try {
-    const weatherQuery = query(
-      ref(database, 'water-heater-user/weather_history'),
-      orderByKey(),
-      limitToLast(5000)
-    );
-    const snapshot = await get(weatherQuery);
-
+    const eventsQuery = query(ref(database, `${BASE}/sensor_events`), orderByKey(), limitToLast(500));
+    const snapshot = await get(eventsQuery);
     if (!snapshot.exists()) return [];
 
-    const data = snapshot.val();
-    if (!data) return [];
-
-    return Object.values(data)
-      .sort((a, b) => (a.unix_timestamp || 0) - (b.unix_timestamp || 0))
-      .map(weather => ({
-        ...weather,
-        timestamp: weather.timestamp || new Date(weather.unix_timestamp * 1000).toISOString()
-      }));
+    let events = Object.values(snapshot.val()).filter(e => e && e.unix_timestamp);
+    if (sensorId) events = events.filter(e => e.sensorId === sensorId);
+    return events.sort((a, b) => (b.unix_timestamp || 0) - (a.unix_timestamp || 0));
   } catch (error) {
-    console.error('Weather history fetch error:', error);
+    console.error('Sensor events fetch error:', error);
     return [];
   }
 };
 
 /**
- * Fetch the smallest critical payload needed to render the Overview tab.
- * Used to unblock the UI as fast as possible on first paint.
+ * Record a sensor lifecycle event (e.g. a location move made from Settings).
  */
-export const fetchInitialData = async () => {
-  const [sensorConfig, latest] = await Promise.all([
-    fetchSensorConfig(),
-    fetchLatestData()
-  ]);
-
-  const updatedSensorConfig = await discoverAndEnsureSensors(latest, sensorConfig);
-
-  return {
-    latest,
-    sensorConfig: updatedSensorConfig
-  };
+export const logSensorEvent = async (sensorId, event, extra = {}) => {
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const eventsRef = ref(database, `${BASE}/sensor_events`);
+    // Key by unix timestamp (seconds) to match the rest of the schema.
+    await set(ref(database, `${BASE}/sensor_events/${now}`), {
+      sensorId,
+      event,
+      timestamp: new Date(now * 1000).toISOString(),
+      unix_timestamp: now,
+      ...extra,
+    });
+    return true;
+  } catch (error) {
+    console.error('Error logging sensor event:', error);
+    return false;
+  }
 };
 
 /**
- * Fetch the larger payloads needed for the Trends and Logs tabs.
- * Runs after fetchInitialData so the Overview is already visible.
+ * Fetch all-time records (min/max per sensor + when).
  */
-export const fetchBackgroundData = async (targetDate) => {
-  // allSettled (not all): if one fetch fails, keep the others instead of
-  // discarding everything.
-  const results = await Promise.allSettled([
-    fetchHistoricalData(targetDate),
-    fetchWeatherHistory(),
-    fetchLogs()
-  ]);
-  const val = (r) => (r.status === 'fulfilled' ? r.value : []);
+export const fetchRecords = async () => {
+  try {
+    const snapshot = await get(ref(database, `${BASE}/stats/records`));
+    return snapshot.exists() ? snapshot.val() : null;
+  } catch (error) {
+    console.error('Records fetch error:', error);
+    return null;
+  }
+};
 
+// ─────────────────────────── Orchestration ───────────────────────────
+
+/**
+ * Smallest payload to render the Overview fast on first paint.
+ */
+export const fetchInitialData = async () => {
+  const [sensorConfig, latest] = await Promise.all([fetchSensorConfig(), fetchLatestData()]);
+  const updatedSensorConfig = await discoverAndEnsureSensors(latest, sensorConfig);
+  return { latest, sensorConfig: updatedSensorConfig };
+};
+
+/**
+ * Larger payloads for Trends and Logs. `range` selects which tier historical
+ * data comes from.
+ */
+export const fetchBackgroundData = async (range = '24h') => {
+  const results = await Promise.allSettled([fetchHistoricalData(range), fetchLogs()]);
+  const val = (r) => (r.status === 'fulfilled' ? r.value : []);
   return {
     historical: val(results[0]),
-    weatherHistory: val(results[1]),
-    logs: val(results[2]),
+    logs: val(results[1]),
   };
 };

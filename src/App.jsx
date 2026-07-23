@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   AppBar,
@@ -27,17 +27,22 @@ import './App.css';
 
 function App() {
   const [currentTab, setCurrentTab] = useState(0);
+  const [range, setRange] = useState('24h');
   const [data, setData] = useState({
     latest: null,
     historical: [],
-    weatherHistory: [],
     logs: [],
     sensorConfig: {}
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
-  const refreshData = async (targetDate) => {
+  // Keep the current range readable inside the interval callback without
+  // re-subscribing the effect.
+  const rangeRef = useRef(range);
+  rangeRef.current = range;
+
+  const refreshData = async (selectedRange = rangeRef.current) => {
     try {
       setError(null);
 
@@ -50,17 +55,22 @@ function App() {
       setSensorConfig(initial.sensorConfig);
       setLoading(false);
 
-      const background = await fetchBackgroundData(targetDate);
+      const background = await fetchBackgroundData(selectedRange);
       setData(prev => ({
         ...prev,
         historical: background.historical,
-        weatherHistory: background.weatherHistory,
         logs: background.logs,
       }));
     } catch (err) {
       setError('Failed to load data. Please try again.');
       setLoading(false);
     }
+  };
+
+  // Change the Trends range: update state and refetch that tier immediately.
+  const handleRangeChange = (newRange) => {
+    setRange(newRange);
+    refreshData(newRange);
   };
 
   useEffect(() => {
@@ -78,8 +88,8 @@ function App() {
         return <Trends
           latest={data.latest}
           historical={data.historical}
-          weatherHistory={data.weatherHistory}
-          onDateChange={refreshData}
+          range={range}
+          onRangeChange={handleRangeChange}
         />;
       case 2:
         return <Logs logs={data.logs} />;
