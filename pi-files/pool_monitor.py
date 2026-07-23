@@ -19,20 +19,30 @@ firebase_admin.initialize_app(cred, {
 })
 
 def log_to_db(level, message):
-    """Log messages to Firebase database"""
+    """Log messages to Firebase database.
+
+    Warnings/errors go to a separate 'logs_errors' node that's retained longer
+    than routine info/heartbeat logs.
+    """
     try:
-        ref = db.reference('/water-heater-user/logs')
         timestamp = datetime.now().isoformat()
         unix_timestamp = int(time.time())
-       
+
         log_entry = {
             'timestamp': timestamp,
             'unix_timestamp': unix_timestamp,
             'level': level,
             'message': message
         }
-       
-        ref.child(str(unix_timestamp)).set(log_entry)
+
+        node = 'logs_errors' if level in ('ERROR', 'WARNING') else 'logs'
+        db.reference(f'/water-heater-user/{node}').child(str(unix_timestamp)).set(log_entry)
+
+        # TRANSITIONAL: mirror errors/warnings into the legacy 'logs' node too,
+        # so the current dashboard still shows them until the frontend cutover.
+        if node != 'logs':
+            db.reference('/water-heater-user/logs').child(str(unix_timestamp)).set(log_entry)
+
         print(f"[{level}] {message}")
     except Exception as e:
         # Fallback to console if Firebase logging fails
@@ -482,14 +492,28 @@ def log_to_firebase(ds18b20_readings, rf_readings, weather_info=None):
             data['outside_humidity'] = w.get('humidity')
             data['outside_conditions'] = w.get('description')
 
-        # Store with unix timestamp as the document name
-        readings_ref = ref.child('readings').child(str(unix_timestamp))
-        readings_ref.set(data)
-       
-        # Also update latest reading for quick access
-        latest_ref = ref.child('latest')
-        latest_ref.set(data)
-       
+        # Store the raw reading (HOT tier) keyed by unix timestamp, and refresh
+        # the single 'live' snapshot used by the Overview.
+        ref.child('readings_raw').child(str(unix_timestamp)).set(data)
+        ref.child('live').set(data)
+
+        # TRANSITIONAL: also write the legacy paths so the current dashboard
+        # keeps working until the frontend cutover (Phase 2). Remove this block
+        # once the new UI is live.
+        ref.child('readings').child(str(unix_timestamp)).set(data)
+        ref.child('latest').set(data)
+
+        # Stamp lastSeen for every sensor that reported a numeric value this
+        # cycle, so the sensorHealth function can detect one going offline.
+        sensor_updates = {}
+        for key, value in data.items():
+            if key in ('timestamp', 'unix_timestamp') or key.startswith('outside_'):
+                continue
+            if isinstance(value, (int, float)):
+                sensor_updates[f'{key}/lastSeen'] = unix_timestamp
+        if sensor_updates:
+            ref.child('sensors').update(sensor_updates)
+
         print(f"[INFO] Successfully logged data for timestamp {unix_timestamp}")
         print("[DEBUG] Data written to Firebase:")
         print(json.dumps(data, indent=2))
