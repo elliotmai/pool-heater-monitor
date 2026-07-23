@@ -173,20 +173,25 @@ const discoverAndEnsureSensors = async (firebaseData, currentSensorConfig) => {
 export const fetchLatestData = async () => {
   try {
     const liveRef = ref(database, `${BASE}/live`);
+    const legacyRef = ref(database, `${BASE}/latest`); // transition fallback
     const weatherQuery = query(ref(database, `${BASE}/weather_history`), orderByKey(), limitToLast(1));
 
-    const [liveSnapshot, weatherSnapshot] = await Promise.all([get(liveRef), get(weatherQuery)]);
+    const [liveSnap, legacySnap, weatherSnap] = await Promise.all([
+      get(liveRef), get(legacyRef), get(weatherQuery),
+    ]);
 
-    if (!liveSnapshot.exists()) {
-      throw new Error('Failed to fetch latest data');
-    }
+    const live = liveSnap.exists() ? liveSnap.val()
+      : legacySnap.exists() ? legacySnap.val()
+        : null;
 
-    const live = liveSnapshot.val();
+    // No snapshot anywhere yet — return null so the UI shows placeholders
+    // instead of crashing.
+    if (!live) return null;
 
     // Latest rich weather (for the Overview weather card).
     let latestWeather = null;
-    if (weatherSnapshot.exists()) {
-      const vals = Object.values(weatherSnapshot.val());
+    if (weatherSnap.exists()) {
+      const vals = Object.values(weatherSnap.val());
       latestWeather = vals[vals.length - 1] || null;
     }
 
@@ -205,7 +210,7 @@ export const fetchLatestData = async () => {
     return converted;
   } catch (error) {
     console.error('Error fetching latest data:', error);
-    throw error;
+    return null;
   }
 };
 
@@ -273,10 +278,19 @@ export const fetchHistoricalData = async (range = '24h') => {
       startAt(String(cutoffSec)),
     );
     const snapshot = await get(tierQuery);
-    if (!snapshot.exists()) return [];
+
+    let val = snapshot.exists() ? snapshot.val() : null;
+
+    // Transition fallback: if the raw tier hasn't been populated yet, read the
+    // legacy 'readings' node (same flat shape; weather just won't be embedded).
+    if (!val && cfg.tier === 'raw') {
+      const legacy = await get(query(ref(database, `${BASE}/readings`), orderByKey(), startAt(String(cutoffSec))));
+      val = legacy.exists() ? legacy.val() : null;
+    }
+    if (!val) return [];
 
     const normalize = cfg.tier === 'raw' ? normalizeRaw : normalizeBucket;
-    return Object.values(snapshot.val())
+    return Object.values(val)
       .filter(r => r && r.unix_timestamp)
       .sort((a, b) => (a.unix_timestamp || 0) - (b.unix_timestamp || 0))
       .map(r => normalize(r, range));

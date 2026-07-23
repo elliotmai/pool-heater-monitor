@@ -178,12 +178,17 @@ const Overview = ({ latest, weather }) => {
     offsetY: null
   });
 
-  // Use weather from latest data
-  const weatherData = latest?.weather;
-  if (weatherData?.temp_f === -100 && weather) weatherData.temp_f = '--';
-  if (weatherData?.temp_c === -100 && weather) weatherData.temp_c = '--';
-  if (weatherData?.humidity === -100 && weather) weatherData.humidity = '--';
-  if (weatherData?.description === 'None' || !weather) weatherData.description = '--';
+  // Use weather from latest data. Sensors write -100 / 'None' as sentinels for
+  // "no reading"; normalize those to null without mutating the source object
+  // (which may be undefined when there's no data yet).
+  const rawWeather = latest?.weather;
+  const weatherData = rawWeather ? {
+    ...rawWeather,
+    temp_f: rawWeather.temp_f === -100 ? null : rawWeather.temp_f,
+    temp_c: rawWeather.temp_c === -100 ? null : rawWeather.temp_c,
+    humidity: rawWeather.humidity === -100 ? null : rawWeather.humidity,
+    description: (!rawWeather.description || rawWeather.description === 'None') ? null : rawWeather.description,
+  } : null;
 
   // Filter to only show alive sensors (enabled = alive from Firebase)
   const aliveSensors = Object.entries(SENSOR_CONFIG).filter(
@@ -415,8 +420,8 @@ const Overview = ({ latest, weather }) => {
               <Grid item xs={12} sm={6}>
                 <WeatherCard
                   label="Temperature"
-                  value={`${weatherData.temp_f?.toFixed(1)}°F`}
-                  subtitle={`Humidity: ${weatherData.humidity}%`}
+                  value={weatherData.temp_f != null ? `${weatherData.temp_f.toFixed(1)}°F` : '--'}
+                  subtitle={weatherData.humidity != null ? `Humidity: ${weatherData.humidity}%` : 'Humidity: --'}
                 />
               </Grid>
               <Grid item xs={12} sm={6}>
