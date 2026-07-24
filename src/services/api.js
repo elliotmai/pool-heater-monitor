@@ -366,6 +366,23 @@ export const logSensorEvent = async (sensorId, event, extra = {}) => {
 };
 
 /**
+ * Fetch everything the Stats page needs in one shot: raw (7d), hourly (30d)
+ * and daily (up to 1y) readings, plus all-time records and sensor events.
+ * Rows are already normalized to flat °F; bucket rows also carry `${name}_min`
+ * and `${name}_max` so period min/max can be computed accurately.
+ */
+export const fetchStatsBundle = async () => {
+  const [raw7d, hourly30d, dailyYear, records, events] = await Promise.all([
+    fetchHistoricalData('7d'),
+    fetchHistoricalData('30d'),
+    fetchHistoricalData('1y'),
+    fetchRecords(),
+    fetchSensorEvents(),
+  ]);
+  return { raw7d, hourly30d, dailyYear, records, events };
+};
+
+/**
  * Fetch all-time records (min/max per sensor + when).
  */
 export const fetchRecords = async () => {
