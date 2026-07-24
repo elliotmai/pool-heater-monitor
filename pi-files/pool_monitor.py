@@ -38,11 +38,6 @@ def log_to_db(level, message):
         node = 'logs_errors' if level in ('ERROR', 'WARNING') else 'logs'
         db.reference(f'/water-heater-user/{node}').child(str(unix_timestamp)).set(log_entry)
 
-        # TRANSITIONAL: mirror errors/warnings into the legacy 'logs' node too,
-        # so the current dashboard still shows them until the frontend cutover.
-        if node != 'logs':
-            db.reference('/water-heater-user/logs').child(str(unix_timestamp)).set(log_entry)
-
         print(f"[{level}] {message}")
     except Exception as e:
         # Fallback to console if Firebase logging fails
@@ -496,12 +491,6 @@ def log_to_firebase(ds18b20_readings, rf_readings, weather_info=None):
         # the single 'live' snapshot used by the Overview.
         ref.child('readings_raw').child(str(unix_timestamp)).set(data)
         ref.child('live').set(data)
-
-        # TRANSITIONAL: also write the legacy paths so the current dashboard
-        # keeps working until the frontend cutover (Phase 2). Remove this block
-        # once the new UI is live.
-        ref.child('readings').child(str(unix_timestamp)).set(data)
-        ref.child('latest').set(data)
 
         # Stamp lastSeen for every sensor that reported a numeric value this
         # cycle, so the sensorHealth function can detect one going offline.

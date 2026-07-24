@@ -39,11 +39,12 @@ const RETENTION = {
   [HOURLY]: 90 * 86400,
   [`${BASE}/logs`]: 14 * 86400,
   [`${BASE}/logs_errors`]: 90 * 86400,
-  // TRANSITIONAL: keep the legacy pre-migration nodes bounded until the
-  // frontend cutover (Phase 2) removes the Pi's dual-write. Safe to delete
-  // these two lines afterwards.
-  [`${BASE}/readings`]: 7 * 86400,
+  // weather_history is still written every cycle (its latest record powers the
+  // Overview weather card) — bounded here.
   [`${BASE}/weather_history`]: 7 * 86400,
+  // 'readings' is the retired legacy node (no longer written); kept here only
+  // to drain any residual entries, after which it prunes to empty.
+  [`${BASE}/readings`]: 7 * 86400,
 };
 
 const OFFLINE_AFTER = 20 * 60; // sensor considered offline after 20 min silent

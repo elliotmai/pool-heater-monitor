@@ -174,19 +174,12 @@ const discoverAndEnsureSensors = async (firebaseData, currentSensorConfig) => {
 export const fetchLatestData = async () => {
   try {
     const liveRef = ref(database, `${BASE}/live`);
-    const legacyRef = ref(database, `${BASE}/latest`); // transition fallback
     const weatherQuery = query(ref(database, `${BASE}/weather_history`), orderByKey(), limitToLast(1));
 
-    const [liveSnap, legacySnap, weatherSnap] = await Promise.all([
-      get(liveRef), get(legacyRef), get(weatherQuery),
-    ]);
+    const [liveSnap, weatherSnap] = await Promise.all([get(liveRef), get(weatherQuery)]);
 
-    const live = liveSnap.exists() ? liveSnap.val()
-      : legacySnap.exists() ? legacySnap.val()
-        : null;
-
-    // No snapshot anywhere yet — return null so the UI shows placeholders
-    // instead of crashing.
+    // No snapshot yet — return null so the UI shows placeholders, not a crash.
+    const live = liveSnap.exists() ? liveSnap.val() : null;
     if (!live) return null;
 
     // Latest rich weather (for the Overview weather card).
@@ -279,16 +272,8 @@ export const fetchHistoricalData = async (range = '24h') => {
       startAt(String(cutoffSec)),
     );
     const snapshot = await get(tierQuery);
-
-    let val = snapshot.exists() ? snapshot.val() : null;
-
-    // Transition fallback: if the raw tier hasn't been populated yet, read the
-    // legacy 'readings' node (same flat shape; weather just won't be embedded).
-    if (!val && cfg.tier === 'raw') {
-      const legacy = await get(query(ref(database, `${BASE}/readings`), orderByKey(), startAt(String(cutoffSec))));
-      val = legacy.exists() ? legacy.val() : null;
-    }
-    if (!val) return [];
+    if (!snapshot.exists()) return [];
+    const val = snapshot.val();
 
     const normalize = cfg.tier === 'raw' ? normalizeRaw : normalizeBucket;
     return Object.values(val)
