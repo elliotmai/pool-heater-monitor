@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
   Box,
   AppBar,
@@ -27,7 +27,7 @@ import './App.css';
 
 function App() {
   const [currentTab, setCurrentTab] = useState(0);
-  const [range, setRange] = useState('24h');
+  const [range, setRange] = useState('7d');
   const [data, setData] = useState({
     latest: null,
     historical: [],
@@ -67,11 +67,14 @@ function App() {
     }
   };
 
-  // Change the Trends range: update state and refetch that tier immediately.
-  const handleRangeChange = (newRange) => {
+  // Change the Trends fetch tier: refetch only when it actually changes.
+  // Stable identity (uses refs) so Trends' effect doesn't loop.
+  const handleRangeChange = useCallback((newRange) => {
+    if (newRange === rangeRef.current) return;
     setRange(newRange);
     refreshData(newRange);
-  };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     refreshData();
@@ -88,7 +91,6 @@ function App() {
         return <Trends
           latest={data.latest}
           historical={data.historical}
-          range={range}
           onRangeChange={handleRangeChange}
         />;
       case 2:
