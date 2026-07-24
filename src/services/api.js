@@ -3,6 +3,7 @@ import {
   get,
   set,
   update,
+  push,
   query,
   orderByKey,
   startAt,
@@ -348,9 +349,9 @@ export const fetchSensorEvents = async (sensorId = null) => {
 export const logSensorEvent = async (sensorId, event, extra = {}) => {
   try {
     const now = Math.floor(Date.now() / 1000);
-    const eventsRef = ref(database, `${BASE}/sensor_events`);
-    // Key by unix timestamp (seconds) to match the rest of the schema.
-    await set(ref(database, `${BASE}/sensor_events/${now}`), {
+    // push() gives a unique chronological key, so several changes saved in the
+    // same second don't overwrite each other.
+    await push(ref(database, `${BASE}/sensor_events`), {
       sensorId,
       event,
       timestamp: new Date(now * 1000).toISOString(),

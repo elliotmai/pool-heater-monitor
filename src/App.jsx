@@ -11,11 +11,13 @@ import {
 import {
   Home,
   ShowChart,
+  Insights,
   ListAlt,
   Settings as SettingsIcon,
 } from '@mui/icons-material';
 import Overview from './components/Overview';
 import Trends from './components/Trends';
+import Stats from './components/Stats';
 import Logs from './components/Logs';
 import Settings from './components/Settings';
 import LoadingScreen from './components/LoadingScreen';
@@ -94,8 +96,10 @@ function App() {
           onRangeChange={handleRangeChange}
         />;
       case 2:
-        return <Logs logs={data.logs} />;
+        return <Stats sensorConfig={data.sensorConfig} />;
       case 3:
+        return <Logs logs={data.logs} />;
+      case 4:
         return <Settings sensorConfig={data.sensorConfig} onRefresh={refreshData} />;
       default:
         return null;
@@ -192,6 +196,10 @@ function App() {
         <BottomNavigationAction
           label="Trends"
           icon={<ShowChart />}
+        />
+        <BottomNavigationAction
+          label="Stats"
+          icon={<Insights />}
         />
         <BottomNavigationAction
           label="Logs"

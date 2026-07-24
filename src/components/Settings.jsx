@@ -20,7 +20,7 @@ import {
   Refresh, 
   // CloudSync 
 } from '@mui/icons-material';
-import { updateSensorConfig } from '../services/api';
+import { updateSensorConfig, logSensorEvent } from '../services/api';
 
 const Settings = ({ sensorConfig, onRefresh }) => {
   const [settings, setSettings] = useState({});
@@ -50,16 +50,37 @@ const Settings = ({ sensorConfig, onRefresh }) => {
   const handleSave = async () => {
     setSaving(true);
     try {
+      // Diff against the last-saved config to record what changed as a sensor
+      // event (rename / move / enable / disable) — the audit trail.
+      const events = [];
+      Object.entries(settings).forEach(([id, cfg]) => {
+        const orig = sensorConfig?.[id] || {};
+        const oldName = orig.displayName || id;
+        const newName = cfg.displayName || id;
+        if (newName !== oldName) events.push([id, 'renamed', { from: oldName, to: newName }]);
+
+        const oldLoc = orig.location || '';
+        const newLoc = cfg.location || '';
+        if (newLoc !== oldLoc) events.push([id, 'moved', { from: oldLoc || '—', to: newLoc || '—' }]);
+
+        const oldEnabled = orig.enabled !== false;
+        const newEnabled = cfg.enabled !== false;
+        if (newEnabled !== oldEnabled) events.push([id, newEnabled ? 'enabled' : 'disabled', {}]);
+      });
+
       // Update each sensor's configuration in Firebase
-      const updatePromises = Object.entries(settings).map(([sensorId, config]) => 
+      await Promise.all(Object.entries(settings).map(([sensorId, config]) =>
         updateSensorConfig(sensorId, config)
-      );
-      
-      await Promise.all(updatePromises);
-      
+      ));
+
+      // Record the change events (best-effort; don't fail the save on these)
+      await Promise.all(events.map(([id, ev, extra]) => logSensorEvent(id, ev, extra)));
+
       setSnackbar({
         open: true,
-        message: 'Settings saved to Firebase successfully!',
+        message: events.length
+          ? `Saved · logged ${events.length} change${events.length !== 1 ? 's' : ''}`
+          : 'Settings saved to Firebase successfully!',
         severity: 'success'
       });
       setHasChanges(false);
@@ -239,6 +260,17 @@ const Settings = ({ sensorConfig, onRefresh }) => {
                           }}
                         />
                       </Box>
+
+                      <TextField
+                        label="Location"
+                        placeholder="e.g. Living Room, Garage, Outdoor"
+                        value={sensor.location || ''}
+                        onChange={(e) => handleSensorChange(key, 'location', e.target.value)}
+                        fullWidth
+                        size="small"
+                        variant="outlined"
+                        helperText="Changing this logs a 'moved' event in the sensor timeline"
+                      />
                     </Box>
                   ))}
                 </>
