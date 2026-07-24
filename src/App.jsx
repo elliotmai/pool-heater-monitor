@@ -96,7 +96,7 @@ function App() {
           onRangeChange={handleRangeChange}
         />;
       case 2:
-        return <Stats sensorConfig={data.sensorConfig} />;
+        return <Stats sensorConfig={data.sensorConfig} latest={data.latest} />;
       case 3:
         return <Logs logs={data.logs} />;
       case 4:

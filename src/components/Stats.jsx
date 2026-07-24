@@ -4,11 +4,14 @@ import {
   ArrowUpward, ArrowDownward, DriveFileRenameOutline, PlaceOutlined, WifiOff, Wifi,
   ToggleOn, ToggleOff, AddCircleOutline, History, LocalFireDepartment, AcUnit, SwapVert, Sensors,
 } from '@mui/icons-material';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { fetchStatsBundle } from '../services/api';
 
 const fmtDate = (u) => u ? new Date(u * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
 const fmtDateTime = (u) => u ? new Date(u * 1000).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
 const f1 = (n) => (n == null ? '—' : `${n.toFixed(1)}°`);
+const signed = (n) => (n == null ? '—' : `${n >= 0 ? '+' : ''}${n.toFixed(1)}°`);
+const hourLabel = (h) => (h === 0 ? '12a' : h < 12 ? `${h}a` : h === 12 ? '12p' : `${h - 12}p`);
 
 const META = new Set(['time', 'timestamp', 'unix_timestamp', 'outdoor_temp', 'outdoor_humidity', 'weather_description']);
 
@@ -46,6 +49,12 @@ const EVENT_META = {
   added: { label: 'Added', color: '#34c759', icon: <AddCircleOutline sx={{ fontSize: 16 }} /> },
 };
 
+const SectionTitle = ({ children }) => (
+  <Typography variant="overline" sx={{ fontSize: '13px', fontWeight: 600, color: '#8e8e93', letterSpacing: '0.5px', display: 'block', textAlign: 'center', mb: 1.5 }}>
+    {children}
+  </Typography>
+);
+
 const FunFact = ({ icon, label, value, sub, color }) => (
   <Box sx={{ flex: '1 1 140px', minWidth: 130, bgcolor: '#f8f9fa', border: '1px solid rgba(0,0,0,0.05)', borderRadius: 2, p: 1.5, textAlign: 'center' }}>
     <Box sx={{ color: color || '#8e8e93', mb: 0.5 }}>{icon}</Box>
@@ -66,7 +75,7 @@ const PeriodRow = ({ label, stat }) => (
   </Box>
 );
 
-const Stats = ({ sensorConfig }) => {
+const Stats = ({ sensorConfig, latest }) => {
   const [bundle, setBundle] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -94,28 +103,95 @@ const Stats = ({ sensorConfig }) => {
 
   const nowSec = Math.floor(Date.now() / 1000);
 
+  // Reliability: fraction of raw cycles each sensor was present in (7d).
+  const reliability = useMemo(() => {
+    if (!bundle) return [];
+    const total = bundle.raw7d.length || 1;
+    return sensorNames.map(name => {
+      let present = 0, lastTs = null;
+      bundle.raw7d.forEach(r => { if (typeof r[name] === 'number') { present += 1; lastTs = r.unix_timestamp; } });
+      return { name, uptime: present / total, present, total, lastTs };
+    }).sort((a, b) => b.uptime - a.uptime);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bundle, sensorNames]);
+
+  // "Primary" = well-covered sensors (real rooms), used for charts/comparison so
+  // one-off RTL pickups don't clutter them.
+  const primary = useMemo(() => reliability.filter(r => r.uptime >= 0.3).map(r => r.name), [reliability]);
+
+  const currentOf = (name) => {
+    if (latest && typeof latest[name] === 'number') return latest[name];
+    if (!bundle) return null;
+    for (let i = bundle.raw7d.length - 1; i >= 0; i--) {
+      if (typeof bundle.raw7d[i][name] === 'number') return bundle.raw7d[i][name];
+    }
+    return null;
+  };
+  const outdoorNow = useMemo(() => {
+    const w = latest?.weather?.temp_f;
+    if (typeof w === 'number' && w !== -100) return w;
+    if (!bundle) return null;
+    for (let i = bundle.raw7d.length - 1; i >= 0; i--) {
+      if (typeof bundle.raw7d[i].outdoor_temp === 'number') return bundle.raw7d[i].outdoor_temp;
+    }
+    return null;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bundle, latest]);
+
+  const avg7Of = useMemo(() => {
+    const m = {};
+    if (bundle) sensorNames.forEach(n => { const s = periodStats(bundle.raw7d, n); if (s) m[n] = s.avg; });
+    return m;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bundle, sensorNames]);
+
+  // Room comparison (current temp, delta vs outside, 7d avg), warmest first.
+  const rooms = useMemo(() => primary
+    .map(name => {
+      const current = currentOf(name);
+      return { name, current, delta: (current != null && outdoorNow != null) ? current - outdoorNow : null, avg7: avg7Of[name] ?? null };
+    })
+    .filter(r => r.current != null)
+    .sort((a, b) => b.current - a.current),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [primary, outdoorNow, avg7Of]);
+
+  // Average temperature by hour of day (local), from 30d hourly buckets.
+  const hourOfDay = useMemo(() => {
+    if (!bundle) return [];
+    const acc = Array.from({ length: 24 }, () => ({}));
+    bundle.hourly30d.forEach(row => {
+      const h = new Date(row.unix_timestamp * 1000).getHours();
+      primary.forEach(name => {
+        const v = row[name];
+        if (typeof v === 'number') { const a = acc[h][name] || (acc[h][name] = { sum: 0, n: 0 }); a.sum += v; a.n += 1; }
+      });
+    });
+    return acc.map((slot, h) => {
+      const point = { hour: h };
+      primary.forEach(name => { const a = slot[name]; if (a && a.n) point[name] = Math.round((a.sum / a.n) * 10) / 10; });
+      return point;
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bundle, primary]);
+
   const perSensor = useMemo(() => {
     if (!bundle) return [];
     const raw24 = bundle.raw7d.filter(r => r.unix_timestamp >= nowSec - 86400);
     return sensorNames.map(name => ({
-      name,
-      s24: periodStats(raw24, name),
-      s7: periodStats(bundle.raw7d, name),
-      s30: periodStats(bundle.hourly30d, name),
+      name, s24: periodStats(raw24, name), s7: periodStats(bundle.raw7d, name), s30: periodStats(bundle.hourly30d, name),
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bundle, sensorNames]);
 
   const fun = useMemo(() => {
     if (!bundle) return null;
-    // Biggest 24h swing across sensors.
     const raw24 = bundle.raw7d.filter(r => r.unix_timestamp >= nowSec - 86400);
     let swing = null;
     sensorNames.forEach(name => {
       const s = periodStats(raw24, name);
       if (s && (!swing || (s.max - s.min) > swing.range)) swing = { name, range: s.max - s.min };
     });
-    // Hottest / coldest day across all sensors (from daily buckets).
     let hot = null, cold = null;
     bundle.dailyYear.forEach(row => {
       let dMax = -Infinity, dMin = Infinity;
@@ -143,13 +219,11 @@ const Stats = ({ sensorConfig }) => {
 
   return (
     <Box sx={{ p: 2, maxWidth: '800px', mx: 'auto' }}>
-      {/* Fun highlights */}
+      {/* Highlights */}
       {fun && (
         <Card sx={{ mb: 1.5, boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)' }}>
           <CardContent>
-            <Typography variant="overline" sx={{ fontSize: '13px', fontWeight: 600, color: '#8e8e93', letterSpacing: '0.5px', display: 'block', textAlign: 'center', mb: 1.5 }}>
-              Highlights
-            </Typography>
+            <SectionTitle>Highlights</SectionTitle>
             <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1, justifyContent: 'center' }}>
               <FunFact icon={<LocalFireDepartment />} color="#ff3b30" label="Hottest day" value={fun.hot ? f1(fun.hot.temp) : '—'} sub={fun.hot ? fmtDate(fun.hot.unix) : ''} />
               <FunFact icon={<AcUnit />} color="#007aff" label="Coldest day" value={fun.cold ? f1(fun.cold.temp) : '—'} sub={fun.cold ? fmtDate(fun.cold.unix) : ''} />
@@ -160,12 +234,62 @@ const Stats = ({ sensorConfig }) => {
         </Card>
       )}
 
+      {/* Room comparison — right now, vs outside */}
+      {rooms.length > 0 && (
+        <Card sx={{ mb: 1.5, boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)' }}>
+          <CardContent>
+            <SectionTitle>Rooms Right Now</SectionTitle>
+            {outdoorNow != null && (
+              <Typography sx={{ fontSize: '11px', color: '#8e8e93', textAlign: 'center', mb: 1 }}>
+                Outside: <b>{f1(outdoorNow)}</b> · "vs out" is each room minus outside
+              </Typography>
+            )}
+            {rooms.map((r, i) => (
+              <Box key={r.name} sx={{ display: 'flex', alignItems: 'center', py: 0.75, borderTop: i > 0 ? '1px solid rgba(0,0,0,0.05)' : 'none' }}>
+                <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: colorOf(r.name), mr: 1 }} />
+                <Typography sx={{ flex: 1, fontSize: '14px', fontWeight: 600, color: '#1c1c1e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nameOf(r.name)}</Typography>
+                <Typography sx={{ width: 70, textAlign: 'right', fontSize: '15px', fontWeight: 700, color: '#1c1c1e' }}>{f1(r.current)}</Typography>
+                <Typography sx={{ width: 64, textAlign: 'right', fontSize: '12px', color: r.delta == null ? '#8e8e93' : r.delta >= 0 ? '#ff3b30' : '#007aff' }}>
+                  {r.delta == null ? '' : `${signed(r.delta)}`}
+                </Typography>
+                <Typography sx={{ width: 74, textAlign: 'right', fontSize: '11px', color: '#8e8e93' }}>{r.avg7 != null ? `7d ${f1(r.avg7)}` : ''}</Typography>
+              </Box>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Average temperature by hour of day */}
+      {primary.length > 0 && hourOfDay.some(p => primary.some(n => p[n] != null)) && (
+        <Card sx={{ mb: 1.5, boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)' }}>
+          <CardContent>
+            <SectionTitle>Average by Hour of Day (30d)</SectionTitle>
+            <Box sx={{ height: 260 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={hourOfDay} margin={{ top: 5, right: 10, left: 0, bottom: 5 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="rgba(0,0,0,0.05)" />
+                  <XAxis dataKey="hour" tickFormatter={hourLabel} interval={2} tick={{ fontSize: 10 }} />
+                  <YAxis tick={{ fontSize: 11 }} width={40} domain={['auto', 'auto']} label={{ value: '°F', angle: -90, position: 'insideLeft', style: { fontSize: 11 } }} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: 'rgba(0,0,0,0.8)', border: 'none', borderRadius: '8px', fontSize: '11px', color: 'white' }}
+                    labelFormatter={(h) => `${hourLabel(h)}`}
+                    formatter={(v, n) => [`${v.toFixed(1)}°F`, nameOf(n)]}
+                  />
+                  <Legend wrapperStyle={{ fontSize: '11px', paddingTop: '8px' }} formatter={(n) => nameOf(n)} />
+                  {primary.map(name => (
+                    <Line key={name} type="monotone" dataKey={name} stroke={colorOf(name)} strokeWidth={2} dot={false} connectNulls name={name} />
+                  ))}
+                </LineChart>
+              </ResponsiveContainer>
+            </Box>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Per-sensor stats over periods */}
       <Card sx={{ mb: 1.5, boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)' }}>
         <CardContent>
-          <Typography variant="overline" sx={{ fontSize: '13px', fontWeight: 600, color: '#8e8e93', letterSpacing: '0.5px', display: 'block', textAlign: 'center', mb: 1 }}>
-            Min · Avg · Max by Period
-          </Typography>
+          <SectionTitle>Min · Avg · Max by Period</SectionTitle>
           {perSensor.length === 0 ? (
             <Typography variant="body2" sx={{ textAlign: 'center', color: '#8e8e93', py: 2 }}>No sensor data yet.</Typography>
           ) : (
@@ -176,7 +300,6 @@ const Stats = ({ sensorConfig }) => {
                   <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: colorOf(name) }} />
                   <Typography sx={{ fontSize: '14px', fontWeight: 600, color: '#1c1c1e' }}>{nameOf(name)}</Typography>
                 </Box>
-                {/* header */}
                 <Box sx={{ display: 'flex', alignItems: 'center', pb: 0.25 }}>
                   <Box sx={{ width: 42 }} />
                   <Box sx={{ flex: 1, display: 'flex', justifyContent: 'space-around' }}>
@@ -197,9 +320,7 @@ const Stats = ({ sensorConfig }) => {
       {/* All-time records */}
       <Card sx={{ mb: 1.5, boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)' }}>
         <CardContent>
-          <Typography variant="overline" sx={{ fontSize: '13px', fontWeight: 600, color: '#8e8e93', letterSpacing: '0.5px', display: 'block', textAlign: 'center', mb: 1.5 }}>
-            All-Time Records
-          </Typography>
+          <SectionTitle>All-Time Records</SectionTitle>
           {(() => {
             const recs = bundle?.records?.sensors ? Object.entries(bundle.records.sensors) : [];
             const outdoor = bundle?.records?.outside?.temp_f;
@@ -249,6 +370,32 @@ const Stats = ({ sensorConfig }) => {
           })()}
         </CardContent>
       </Card>
+
+      {/* Sensor reliability */}
+      {reliability.length > 0 && (
+        <Card sx={{ mb: 1.5, boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)' }}>
+          <CardContent>
+            <SectionTitle>Sensor Reliability (7d)</SectionTitle>
+            {reliability.map((r, i) => (
+              <Box key={r.name} sx={{ py: 0.75, borderTop: i > 0 ? '1px solid rgba(0,0,0,0.05)' : 'none' }}>
+                <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+                  <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: colorOf(r.name), mr: 1 }} />
+                  <Typography sx={{ flex: 1, fontSize: '13px', fontWeight: 600, color: '#1c1c1e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nameOf(r.name)}</Typography>
+                  <Typography sx={{ fontSize: '13px', fontWeight: 700, color: r.uptime >= 0.8 ? '#34c759' : r.uptime >= 0.4 ? '#ff9500' : '#ff3b30' }}>
+                    {Math.round(r.uptime * 100)}%
+                  </Typography>
+                </Box>
+                <Box sx={{ height: 5, borderRadius: 3, bgcolor: '#eee', overflow: 'hidden' }}>
+                  <Box sx={{ width: `${Math.min(100, Math.round(r.uptime * 100))}%`, height: '100%', bgcolor: r.uptime >= 0.8 ? '#34c759' : r.uptime >= 0.4 ? '#ff9500' : '#ff3b30' }} />
+                </Box>
+                <Typography sx={{ fontSize: '10px', color: '#8e8e93', mt: 0.25 }}>
+                  {r.present} readings · last {fmtDateTime(r.lastTs)}
+                </Typography>
+              </Box>
+            ))}
+          </CardContent>
+        </Card>
+      )}
 
       {/* Sensor event timeline */}
       <Card sx={{ boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)' }}>
