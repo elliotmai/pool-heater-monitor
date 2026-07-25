@@ -368,6 +368,26 @@ export const fetchStatsBundle = async () => {
 };
 
 /**
+ * Ask the Pi to restart its monitor service. Writes a command the Pi checks
+ * each cycle; it honors any request newer than its own start time (so it acts
+ * once and doesn't loop). Only takes effect while the Pi is online and looping.
+ */
+export const requestPiRestart = async () => {
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    await set(ref(database, `${BASE}/commands/restart`), {
+      requested_at: now,
+      requested_by: 'dashboard',
+      status: 'requested',
+    });
+    return true;
+  } catch (error) {
+    console.error('Error requesting Pi restart:', error);
+    return false;
+  }
+};
+
+/**
  * Fetch all-time records (min/max per sensor + when).
  */
 export const fetchRecords = async () => {

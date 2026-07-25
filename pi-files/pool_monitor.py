@@ -84,6 +84,25 @@ def load_sensor_mappings():
 
 SENSOR_NAMES = load_sensor_mappings()
 
+def restart_requested(process_start):
+    """Return True if the dashboard has requested a restart since we started.
+
+    We only honor requests newer than this process's start time, so after we
+    restart the same request won't trigger us again (no restart loop).
+    """
+    try:
+        cmd = db.reference('/water-heater-user/commands/restart').get()
+        if isinstance(cmd, dict) and (cmd.get('requested_at') or 0) > process_start:
+            # Acknowledge so the dashboard can reflect that it was picked up.
+            db.reference('/water-heater-user/commands/restart').update({
+                'status': 'restarting',
+                'handled_at': int(time.time()),
+            })
+            return True
+    except Exception as e:
+        print(f"[WARNING] Restart-command check failed: {e}")
+    return False
+
 base_dir = '/sys/bus/w1/devices/'
 
 def get_device_folders():
@@ -639,11 +658,19 @@ def main():
 
     consecutive_failures = 0  # Drives the post-failure back-off
     consecutive_empty = 0     # Cycles in a row with zero sensor data (SDR watchdog)
+    process_start = int(time.time())  # For honoring remote restart requests
 
     while True:
         cycle_start = time.time()
         cycle_errors = []  # Track errors for this cycle
-       
+
+        # Honor a remote restart request from the dashboard (exit 0 -> systemd
+        # restarts us). Checked once per cycle, so it applies within ~5 min.
+        if restart_requested(process_start):
+            log_to_db('INFO', 'Restart requested from dashboard — restarting service')
+            print('[INFO] Restart requested from dashboard, exiting to restart.')
+            sys.exit(0)
+
         try:
             # Step 1: Read DS18B20 wired sensors (continue even if it fails)
             ds18b20_readings = {}

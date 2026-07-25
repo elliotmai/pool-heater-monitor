@@ -13,20 +13,27 @@ import {
   Switch,
   FormControlLabel,
   // Chip,
-  CircularProgress
+  CircularProgress,
+  Dialog,
+  DialogTitle,
+  DialogContent,
+  DialogContentText,
+  DialogActions,
 } from '@mui/material';
-import { 
-  Save, 
-  Refresh, 
-  // CloudSync 
+import {
+  Save,
+  Refresh,
+  RestartAlt,
+  // CloudSync
 } from '@mui/icons-material';
-import { updateSensorConfig, logSensorEvent } from '../services/api';
+import { updateSensorConfig, logSensorEvent, requestPiRestart } from '../services/api';
 
 const Settings = ({ sensorConfig, onRefresh }) => {
   const [settings, setSettings] = useState({});
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [hasChanges, setHasChanges] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [restartOpen, setRestartOpen] = useState(false);
 
   // Load sensor config when it changes
   useEffect(() => {
@@ -98,6 +105,18 @@ const Settings = ({ sensorConfig, onRefresh }) => {
     } finally {
       setSaving(false);
     }
+  };
+
+  const handleRestart = async () => {
+    setRestartOpen(false);
+    const ok = await requestPiRestart();
+    setSnackbar({
+      open: true,
+      message: ok
+        ? 'Restart requested — the Pi will restart within a few minutes (only if it is online).'
+        : 'Failed to send restart request.',
+      severity: ok ? 'info' : 'error',
+    });
   };
 
   const handleRefresh = async () => {
@@ -370,6 +389,30 @@ const Settings = ({ sensorConfig, onRefresh }) => {
         </CardContent>
       </Card>
 
+      {/* Device Control */}
+      <Card sx={{ boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)', mb: 2 }}>
+        <CardContent>
+          <Typography variant="h6" sx={{ fontSize: '17px', fontWeight: 600, color: '#1c1c1e', mb: 0.5 }}>
+            Device
+          </Typography>
+          <Typography variant="body2" sx={{ fontSize: '12px', color: '#8e8e93', mb: 1.5 }}>
+            Remotely restart the monitor on the Pi (e.g. if the receiver seems stuck).
+            Takes effect within a few minutes — only while the Pi is online.
+          </Typography>
+          <Button
+            variant="outlined"
+            startIcon={<RestartAlt />}
+            onClick={() => setRestartOpen(true)}
+            sx={{
+              borderColor: '#ff9500', color: '#ff9500', textTransform: 'none', fontWeight: 600,
+              '&:hover': { borderColor: '#ff9500', bgcolor: 'rgba(255, 149, 0, 0.05)' },
+            }}
+          >
+            Restart Monitor
+          </Button>
+        </CardContent>
+      </Card>
+
       {/* Action Buttons */}
       <Box sx={{ display: 'flex', gap: 2, mb: 2 }}>
         <Button
@@ -424,6 +467,21 @@ const Settings = ({ sensorConfig, onRefresh }) => {
       <Alert severity="info">
         Changes are saved directly to Firebase and will apply immediately after saving.
       </Alert>
+
+      {/* Restart confirmation */}
+      <Dialog open={restartOpen} onClose={() => setRestartOpen(false)}>
+        <DialogTitle sx={{ fontSize: '17px', fontWeight: 600 }}>Restart the monitor?</DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ fontSize: '14px' }}>
+            The Pi will stop and restart its monitor service within a few minutes. Data collection
+            pauses briefly during the restart. This only works while the Pi is online.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setRestartOpen(false)} sx={{ textTransform: 'none', color: '#8e8e93' }}>Cancel</Button>
+          <Button onClick={handleRestart} sx={{ textTransform: 'none', fontWeight: 600, color: '#ff9500' }}>Restart</Button>
+        </DialogActions>
+      </Dialog>
 
       {/* Snackbar for notifications */}
       <Snackbar
