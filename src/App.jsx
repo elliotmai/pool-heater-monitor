@@ -106,6 +106,14 @@ function App() {
     }
   };
 
+  // The Pi writes a heartbeat every cycle (~5 min). If the newest reading is
+  // older than ~3 cycles, it's almost certainly off power or internet — because
+  // if it were up and online it would still be writing rows (even with no
+  // sensor data). Surface that instead of showing silently stale numbers.
+  const lastReadingSec = data.latest?.unix_timestamp || null;
+  const minsAgo = lastReadingSec ? Math.round((Date.now() / 1000 - lastReadingSec) / 60) : null;
+  const piOffline = !loading && (!lastReadingSec || minsAgo > 16);
+
   if (loading) {
     return <LoadingScreen />;
   }
@@ -152,6 +160,15 @@ function App() {
         {error && (
           <Box sx={{ p: 2 }}>
             <Alert severity="error">{error}</Alert>
+          </Box>
+        )}
+        {piOffline && (
+          <Box sx={{ p: 2, pb: 0 }}>
+            <Alert severity="warning">
+              {lastReadingSec
+                ? `No data from the Pi for ${minsAgo} min (last reading ${new Date(data.latest.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}). It's likely off power or internet.`
+                : 'No readings received yet — the Pi may be off power or internet.'}
+            </Alert>
           </Box>
         )}
         {renderTabContent()}

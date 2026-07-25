@@ -1,4 +1,5 @@
 import os
+import sys
 import glob
 import time
 import json
@@ -594,6 +595,9 @@ def main():
     MIN_LOOP_GAP = 5           # Hard floor between cycles (never busy-loop)
     FAILURE_BACKOFF = 60       # Extra cooldown added per consecutive failure
     MAX_FAILURE_BACKOFF = 900  # ...capped at 15 minutes
+    EMPTY_RESTART_AFTER = 6     # consecutive cycles with NO sensor data before we
+                               # assume the SDR/receiver has wedged and exit so
+                               # systemd restarts us with a fresh SDR (~30 min).
    
     print("\n" + "="*60)
     print("MULTI-SENSOR POOL HEATER MONITOR")
@@ -634,6 +638,7 @@ def main():
     print("Press Ctrl+C to stop\n")
 
     consecutive_failures = 0  # Drives the post-failure back-off
+    consecutive_empty = 0     # Cycles in a row with zero sensor data (SDR watchdog)
 
     while True:
         cycle_start = time.time()
@@ -651,6 +656,7 @@ def main():
            
             # Step 2: Read RF 433MHz sensors (continue even if it fails)
             rf_readings = {}
+            rf_nonweather = {}
             try:
                 rf_readings, rf_error, rf_nonweather = read_rtl433_sensors(duration=RTL_SCAN_DURATION)
                 if rf_error:
@@ -674,14 +680,16 @@ def main():
             # Display locally
             display_readings(ds18b20_readings, rf_readings, weather_info)
            
-            # Step 4: Log sensors to Firebase (continue even if it fails)
+            # Step 4: Log to Firebase. Always write a reading row — even with no
+            # sensor values — so it doubles as a heartbeat: the dashboard can
+            # tell the Pi is alive/online, and reliability is measurable against
+            # the number of cycles that were expected.
+            got_data = bool(ds18b20_readings) or bool(rf_readings) or bool(rf_nonweather)
             try:
-                if ds18b20_readings or rf_readings:
-                    log_to_firebase(ds18b20_readings, rf_readings, weather_info)
-                elif rf_nonweather:
+                log_to_firebase(ds18b20_readings, rf_readings, weather_info)
+                if rf_nonweather:
                     log_nonweather_to_firebase(rf_nonweather)
-                    
-                else:
+                if not got_data:
                     cycle_errors.append("No sensor readings available")
                     print("[WARNING] No sensor readings available this cycle")
             except Exception as e:
@@ -714,7 +722,22 @@ def main():
                 consecutive_failures = 0
                 log_to_db_throttled('INFO', 'Cycle completed successfully',
                                     throttle_secs=SUCCESS_LOG_THROTTLE)
-           
+
+            # SDR watchdog: several cycles in a row with zero sensor data almost
+            # always means the RTL-SDR has wedged (a known failure after hours of
+            # use). Exit so systemd restarts us with a fresh SDR instead of
+            # silently logging nothing until the next manual restart.
+            if got_data:
+                consecutive_empty = 0
+            else:
+                consecutive_empty += 1
+                if consecutive_empty >= EMPTY_RESTART_AFTER:
+                    log_to_db('ERROR', f'No sensor data for {consecutive_empty} cycles — '
+                              'restarting to reset the SDR')
+                    print(f'[ERROR] Watchdog: no data for {consecutive_empty} cycles, '
+                          'exiting to trigger a systemd restart.')
+                    sys.exit(1)
+
             # Pace the loop. A healthy RF scan already used most of CYCLE_TARGET,
             # so we sleep the small remainder. If reads failed fast, we sleep the
             # full remainder plus a growing back-off, so failures never busy-loop

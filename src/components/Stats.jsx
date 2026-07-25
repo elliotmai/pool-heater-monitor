@@ -75,6 +75,22 @@ const PeriodRow = ({ label, stat }) => (
   </Box>
 );
 
+const relColor = (u) => (u >= 0.8 ? '#34c759' : u >= 0.4 ? '#ff9500' : '#ff3b30');
+
+const RelRow = ({ label, color, uptime, sub, emphasize, topBorder }) => (
+  <Box sx={{ py: 0.75, borderTop: topBorder ? '1px solid rgba(0,0,0,0.05)' : 'none' }}>
+    <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+      <Box sx={{ width: 10, height: 10, borderRadius: emphasize ? 1 : '50%', bgcolor: color, mr: 1 }} />
+      <Typography sx={{ flex: 1, fontSize: emphasize ? '14px' : '13px', fontWeight: emphasize ? 700 : 600, color: '#1c1c1e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</Typography>
+      <Typography sx={{ fontSize: '13px', fontWeight: 700, color: relColor(uptime) }}>{Math.round(uptime * 100)}%</Typography>
+    </Box>
+    <Box sx={{ height: 5, borderRadius: 3, bgcolor: '#eee', overflow: 'hidden' }}>
+      <Box sx={{ width: `${Math.min(100, Math.round(uptime * 100))}%`, height: '100%', bgcolor: relColor(uptime) }} />
+    </Box>
+    {sub && <Typography sx={{ fontSize: '10px', color: '#8e8e93', mt: 0.25 }}>{sub}</Typography>}
+  </Box>
+);
+
 const Stats = ({ sensorConfig, latest }) => {
   const [bundle, setBundle] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -103,21 +119,36 @@ const Stats = ({ sensorConfig, latest }) => {
 
   const nowSec = Math.floor(Date.now() / 1000);
 
-  // Reliability: fraction of raw cycles each sensor was present in (7d).
+  // Reliability. The Pi now writes a heartbeat row every cycle (~5 min), so:
+  //  - Pi/gateway rating = actual cycles / expected cycles over the data span.
+  //    A drop here means the Pi itself was down (power/internet).
+  //  - Sensor rating = of the cycles the Pi WAS up, how often it reported. This
+  //    isolates a flaky sensor from Pi downtime (all sensors missing = Pi's
+  //    fault, which shows up in the Pi rating instead).
+  const EXPECTED_INTERVAL = 300;
   const reliability = useMemo(() => {
-    if (!bundle) return [];
-    const total = bundle.raw7d.length || 1;
-    return sensorNames.map(name => {
-      let present = 0, lastTs = null;
-      bundle.raw7d.forEach(r => { if (typeof r[name] === 'number') { present += 1; lastTs = r.unix_timestamp; } });
-      return { name, uptime: present / total, present, total, lastTs };
+    if (!bundle) return { pi: null, sensors: [] };
+    const rows = bundle.raw7d;
+    const actualCycles = rows.length;
+    const firstTs = rows.length ? rows[0].unix_timestamp : null;
+    const spanSec = firstTs ? Math.min(7 * 86400, nowSec - firstTs) : 7 * 86400;
+    const expectedCycles = Math.max(1, Math.round(spanSec / EXPECTED_INTERVAL));
+    const lastTs = rows.length ? rows[rows.length - 1].unix_timestamp : null;
+    const pi = { uptime: Math.min(1, actualCycles / expectedCycles), actualCycles, expectedCycles, lastTs };
+
+    const sensors = sensorNames.map(name => {
+      let present = 0, sLast = null;
+      rows.forEach(r => { if (typeof r[name] === 'number') { present += 1; sLast = r.unix_timestamp; } });
+      return { name, uptime: actualCycles ? present / actualCycles : 0, present, lastTs: sLast };
     }).sort((a, b) => b.uptime - a.uptime);
+
+    return { pi, sensors };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bundle, sensorNames]);
 
   // "Primary" = well-covered sensors (real rooms), used for charts/comparison so
   // one-off RTL pickups don't clutter them.
-  const primary = useMemo(() => reliability.filter(r => r.uptime >= 0.3).map(r => r.name), [reliability]);
+  const primary = useMemo(() => reliability.sensors.filter(r => r.uptime >= 0.3).map(r => r.name), [reliability]);
 
   const currentOf = (name) => {
     if (latest && typeof latest[name] === 'number') return latest[name];
@@ -371,27 +402,25 @@ const Stats = ({ sensorConfig, latest }) => {
         </CardContent>
       </Card>
 
-      {/* Sensor reliability */}
-      {reliability.length > 0 && (
+      {/* Reliability — Pi gateway + per-sensor */}
+      {reliability.sensors.length > 0 && (
         <Card sx={{ mb: 1.5, boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)' }}>
           <CardContent>
-            <SectionTitle>Sensor Reliability (7d)</SectionTitle>
-            {reliability.map((r, i) => (
-              <Box key={r.name} sx={{ py: 0.75, borderTop: i > 0 ? '1px solid rgba(0,0,0,0.05)' : 'none' }}>
-                <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
-                  <Box sx={{ width: 10, height: 10, borderRadius: '50%', bgcolor: colorOf(r.name), mr: 1 }} />
-                  <Typography sx={{ flex: 1, fontSize: '13px', fontWeight: 600, color: '#1c1c1e', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{nameOf(r.name)}</Typography>
-                  <Typography sx={{ fontSize: '13px', fontWeight: 700, color: r.uptime >= 0.8 ? '#34c759' : r.uptime >= 0.4 ? '#ff9500' : '#ff3b30' }}>
-                    {Math.round(r.uptime * 100)}%
-                  </Typography>
-                </Box>
-                <Box sx={{ height: 5, borderRadius: 3, bgcolor: '#eee', overflow: 'hidden' }}>
-                  <Box sx={{ width: `${Math.min(100, Math.round(r.uptime * 100))}%`, height: '100%', bgcolor: r.uptime >= 0.8 ? '#34c759' : r.uptime >= 0.4 ? '#ff9500' : '#ff3b30' }} />
-                </Box>
-                <Typography sx={{ fontSize: '10px', color: '#8e8e93', mt: 0.25 }}>
-                  {r.present} readings · last {fmtDateTime(r.lastTs)}
-                </Typography>
-              </Box>
+            <SectionTitle>Reliability (7d)</SectionTitle>
+            {reliability.pi && (
+              <RelRow
+                label="Pi Gateway"
+                color="#1c1c1e"
+                uptime={reliability.pi.uptime}
+                sub={`${reliability.pi.actualCycles} of ~${reliability.pi.expectedCycles} expected cycles · last ${fmtDateTime(reliability.pi.lastTs)}`}
+                emphasize
+              />
+            )}
+            <Divider sx={{ my: 1 }} />
+            <Typography sx={{ fontSize: '10px', color: '#8e8e93', mb: 0.5 }}>Per sensor — share of cycles the Pi was up</Typography>
+            {reliability.sensors.map((r, i) => (
+              <RelRow key={r.name} label={nameOf(r.name)} color={colorOf(r.name)} uptime={r.uptime}
+                sub={`${r.present} readings · last ${fmtDateTime(r.lastTs)}`} topBorder={i > 0} />
             ))}
           </CardContent>
         </Card>
