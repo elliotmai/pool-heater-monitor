@@ -21,6 +21,7 @@ import Stats from './components/Stats';
 import Logs from './components/Logs';
 import Settings from './components/Settings';
 import LoadingScreen from './components/LoadingScreen';
+import WhatsNew from './components/WhatsNew';
 import { fetchInitialData, fetchBackgroundData } from './services/api';
 import { setSensorConfig } from './config/settingsUtils';
 import { CONFIG } from './config/config';
@@ -172,6 +173,33 @@ function App() {
           </Box>
         )}
         {renderTabContent()}
+
+        {/* Persistent footer link */}
+        <Box
+          component="footer"
+          sx={{
+            display: 'flex',
+            justifyContent: 'center',
+            py: 1.5,
+          }}
+        >
+          <Typography
+            component="a"
+            href="https://ticketbooth.netlify.app/"
+            target="_blank"
+            rel="noopener noreferrer"
+            sx={{
+              fontSize: '11px',
+              fontWeight: 500,
+              color: '#8e8e93',
+              textDecoration: 'none',
+              transition: 'color 0.2s',
+              '&:hover': { color: '#007aff' },
+            }}
+          >
+            Report a bug or request a feature
+          </Typography>
+        </Box>
       </Box>
 
       {/* Bottom Tab Bar */}
@@ -227,6 +255,8 @@ function App() {
           icon={<SettingsIcon />}
         />
       </BottomNavigation>
+
+      <WhatsNew />
     </Box>
   );
 }
