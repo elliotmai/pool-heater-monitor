@@ -11,6 +11,19 @@ import { WHATS_NEW } from '../config/whatsNew';
 
 const STORAGE_KEY = 'pool-heater-monitor.whatsNewSeen';
 
+// Compare versions like "2026.07.26" and "2026.07.26.2" numerically per segment,
+// so same-day increments (.1, .2, … .10) order correctly.
+function cmpVersion(a, b) {
+  const pa = String(a).split(".").map(Number);
+  const pb = String(b).split(".").map(Number);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] || 0, y = pb[i] || 0;
+    if (x !== y) return x - y;
+  }
+  return 0;
+}
+
+
 /**
  * Accumulating "What's New" popup. The next time a person opens the app after one
  * or more updates, it shows EVERY changelog entry newer than what this device has
@@ -33,7 +46,7 @@ function WhatsNew() {
       seen = null;
     }
     // Versions are zero-padded YYYY.MM.DD, so string comparison orders them.
-    const unseen = seen == null ? [latest] : WHATS_NEW.filter((e) => e.version > seen);
+    const unseen = seen == null ? [latest] : WHATS_NEW.filter((e) => cmpVersion(e.version, seen) > 0);
     if (unseen.length) setEntries(unseen);
   }, [latest]);
 
