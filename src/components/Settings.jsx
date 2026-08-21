@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   Box,
   Card,
@@ -26,7 +26,36 @@ import {
   RestartAlt,
   // CloudSync
 } from '@mui/icons-material';
-import { updateSensorConfig, logSensorEvent, requestPiRestart } from '../services/api';
+import { updateSensorConfig, logSensorEvent, requestPiRestart, fetchRestartStatus } from '../services/api';
+
+const fmtTime = (unixSec) =>
+  new Date(unixSec * 1000).toLocaleString('en-US', {
+    month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+
+/**
+ * Plain-language state of the last restart request. A request the Pi never
+ * acknowledges means it isn't looping — which is itself the answer to "did my
+ * restart do anything?".
+ */
+const describeRestart = (cmd) => {
+  if (!cmd || !cmd.requested_at) return null;
+  const requested = `Requested ${fmtTime(cmd.requested_at)}`;
+  if (cmd.completed_at && cmd.completed_at >= cmd.requested_at) {
+    return { text: `${requested} — monitor restarted ${fmtTime(cmd.completed_at)}.`, severity: 'success' };
+  }
+  if (cmd.handled_at && cmd.handled_at >= cmd.requested_at) {
+    return { text: `${requested} — picked up by the Pi ${fmtTime(cmd.handled_at)}, restarting.`, severity: 'info' };
+  }
+  const waitedMins = (Date.now() / 1000 - cmd.requested_at) / 60;
+  if (waitedMins > 12) {
+    return {
+      text: `${requested} — never picked up (${Math.round(waitedMins)} min ago). The monitor isn't reading commands, so it isn't looping.`,
+      severity: 'warning',
+    };
+  }
+  return { text: `${requested} — waiting for the Pi to pick it up (checks once a cycle).`, severity: 'info' };
+};
 
 const Settings = ({ sensorConfig, onRefresh }) => {
   const [settings, setSettings] = useState({});
@@ -34,6 +63,19 @@ const Settings = ({ sensorConfig, onRefresh }) => {
   const [hasChanges, setHasChanges] = useState(false);
   const [saving, setSaving] = useState(false);
   const [restartOpen, setRestartOpen] = useState(false);
+  const [restartCmd, setRestartCmd] = useState(null);
+  const restartPoll = useRef(null);
+
+  // Show the outcome of the last restart request (if any) on open, and never
+  // leave the follow-up poll running after this tab goes away.
+  useEffect(() => {
+    let cancelled = false;
+    fetchRestartStatus().then(cmd => { if (!cancelled) setRestartCmd(cmd); });
+    return () => {
+      cancelled = true;
+      if (restartPoll.current) clearInterval(restartPoll.current);
+    };
+  }, []);
 
   // Load sensor config when it changes
   useEffect(() => {
@@ -113,10 +155,26 @@ const Settings = ({ sensorConfig, onRefresh }) => {
     setSnackbar({
       open: true,
       message: ok
-        ? 'Restart requested — the Pi will restart within a few minutes (only if it is online).'
+        ? 'Restart requested — watch below to see whether the Pi picks it up.'
         : 'Failed to send restart request.',
       severity: ok ? 'info' : 'error',
     });
+    if (!ok) return;
+
+    // Follow the request through instead of assuming it landed: the Pi only
+    // checks once per ~5-min cycle, so poll for a couple of cycles and stop.
+    setRestartCmd(await fetchRestartStatus());
+    const started = Date.now();
+    if (restartPoll.current) clearInterval(restartPoll.current);
+    restartPoll.current = setInterval(async () => {
+      const cmd = await fetchRestartStatus();
+      setRestartCmd(cmd);
+      const done = cmd?.completed_at && cmd.completed_at >= cmd.requested_at;
+      if (done || Date.now() - started > 12 * 60 * 1000) {
+        clearInterval(restartPoll.current);
+        restartPoll.current = null;
+      }
+    }, 15000);
   };
 
   const handleRefresh = async () => {
@@ -130,6 +188,7 @@ const Settings = ({ sensorConfig, onRefresh }) => {
     }
   };
 
+  const restartStatus = describeRestart(restartCmd);
   const sensorEntries = Object.entries(settings);
   const enabledSensors = sensorEntries.filter(([_, config]) => config.enabled !== false);
   const disabledSensors = sensorEntries.filter(([_, config]) => config.enabled === false);
@@ -410,6 +469,11 @@ const Settings = ({ sensorConfig, onRefresh }) => {
           >
             Restart Monitor
           </Button>
+          {restartStatus && (
+            <Alert severity={restartStatus.severity} sx={{ mt: 1.5, fontSize: '12px', py: 0.5 }}>
+              {restartStatus.text}
+            </Alert>
+          )}
         </CardContent>
       </Card>
 

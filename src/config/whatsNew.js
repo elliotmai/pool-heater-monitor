@@ -17,6 +17,7 @@ export const WHATS_NEW = [
     items: [
       '⚠️ The app now warns you when the Pi is online but no sensor has reported — previously that looked completely normal, because the Pi keeps sending weather and heartbeats either way.',
       '🛠️ Fixed a bug that could silently discard every wireless sensor reading, and the Pi now reports why readings stopped (receiver dead vs. sensors quiet).',
+      '🔄 “Restart Monitor” now shows whether the Pi actually picked the request up — and warns you when it never did.',
     ],
   },
   {

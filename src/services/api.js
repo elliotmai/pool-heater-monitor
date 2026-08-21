@@ -388,6 +388,23 @@ export const requestPiRestart = async () => {
 };
 
 /**
+ * Read the state of the last remote-restart request, so the UI can say whether
+ * the Pi actually picked it up instead of only that it was sent.
+ *   status 'requested'  — written by the dashboard, not seen by the Pi yet
+ *   status 'restarting' — the Pi read it and is exiting (handled_at set)
+ *   status 'completed'  — the Pi came back up afterwards (completed_at set)
+ */
+export const fetchRestartStatus = async () => {
+  try {
+    const snapshot = await get(ref(database, `${BASE}/commands/restart`));
+    return snapshot.exists() ? snapshot.val() : null;
+  } catch (error) {
+    console.error('Restart status fetch error:', error);
+    return null;
+  }
+};
+
+/**
  * Fetch the Pi's latest self-diagnostics (what the receiver actually heard on
  * its last cycle). Null when the Pi hasn't written one yet — older Pi builds
  * don't publish this node.

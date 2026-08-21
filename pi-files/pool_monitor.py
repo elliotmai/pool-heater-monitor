@@ -103,6 +103,23 @@ def restart_requested(process_start):
         print(f"[WARNING] Restart-command check failed: {e}")
     return False
 
+def complete_restart_command():
+    """Close the loop on a dashboard-requested restart.
+
+    restart_requested() marks the command 'restarting' just before we exit; the
+    process that comes back up marks it 'completed'. Without this the dashboard
+    can only say "sent", which is exactly the ambiguity you hit when a restart
+    appears to do nothing.
+    """
+    try:
+        ref = db.reference('/water-heater-user/commands/restart')
+        cmd = ref.get()
+        if isinstance(cmd, dict) and cmd.get('status') == 'restarting':
+            ref.update({'status': 'completed', 'completed_at': int(time.time())})
+            print('[INFO] Acknowledged completion of the requested restart.')
+    except Exception as e:
+        print(f'[WARNING] Could not mark restart complete: {e}')
+
 base_dir = '/sys/bus/w1/devices/'
 
 def get_device_folders():
@@ -708,6 +725,9 @@ def main():
    
     # Startup log
     log_to_db('INFO', 'House Weather Monitor started')
+
+    # If we're back up because the dashboard asked for a restart, say so there.
+    complete_restart_command()
    
     # Check for DS18B20 sensors on startup
     device_folders = get_device_folders()
