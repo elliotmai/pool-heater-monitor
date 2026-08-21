@@ -164,6 +164,57 @@ def read_all_sensors():
    
     return readings
 
+def is_number(value):
+    """True only for a real numeric reading (bools and None don't count)."""
+    return isinstance(value, (int, float)) and not isinstance(value, bool)
+
+def numeric_readings(readings):
+    """Drop keys whose read failed, so an all-failed dict is falsy.
+
+    read_all_sensors() keeps failed sensors as None so they still show up in
+    the console output; anything deciding "did we actually get data?" must
+    look at this instead, or a dict full of Nones reads as success.
+    """
+    return {k: v for k, v in readings.items() if is_number(v)}
+
+def diagnose_no_data(ds18b20_readings, rf_stats):
+    """One-line, plain-language reason why a cycle produced no readings.
+
+    Deliberately free of counts and model names: this string is the key the
+    error-log throttle dedupes on, so it has to be identical cycle after cycle
+    for the same underlying fault. The varying detail (packet counts, which
+    models were heard) goes to the console and the /diagnostics node instead.
+    """
+    packets = rf_stats.get('packets', 0)
+    temp_packets = rf_stats.get('temp_packets', 0)
+
+    if ds18b20_readings and not numeric_readings(ds18b20_readings):
+        return 'every wired sensor failed to read'
+    if packets == 0:
+        return 'RF receiver heard nothing at all — SDR or antenna problem'
+    if temp_packets == 0:
+        return 'RF receiver is hearing other 433MHz traffic, but no temperature sensors'
+    return 'temperature packets were decoded, but none matched a known sensor'
+
+def extract_temp_c(data):
+    """Pull a temperature in °C out of one rtl_433 JSON packet.
+
+    Decoders are inconsistent about the field name (and rtl_433 upgrades have
+    switched sensors between them), so accept every spelling. Explicit
+    `is None` checks throughout: a genuine 0.0°C reading is falsy, and a
+    truthiness test would silently discard it.
+    """
+    for key in ('temperature_C', 'temperature_c', 'temperature'):
+        value = data.get(key)
+        if is_number(value):
+            return float(value)
+
+    value = data.get('temperature_F')
+    if is_number(value):
+        return (float(value) - 32) * 5 / 9
+
+    return None
+
 def read_rtl433_sensors(duration=30):
     """
     Read 433MHz sensors using rtl_433
@@ -173,10 +224,14 @@ def read_rtl433_sensors(duration=30):
         duration: How long to listen for sensor data (seconds)
    
     Returns:
-        Tuple of (readings dict, error message or None)
+        Tuple of (readings dict, error message or None, non-weather dict, stats dict).
+        `stats` counts what the receiver actually heard this scan so a dead
+        SDR can be told apart from silent sensors.
     """
     readings = {}
     non_weather_readings = {}
+    stats = {'packets': 0, 'temp_packets': 0, 'models': [], 'scan_seconds': duration}
+    models_seen = set()
    
     try:
         print(f'[INFO] Starting RTL-SDR scan for {duration} seconds (filtering for Oria sensors)...')
@@ -206,7 +261,7 @@ def read_rtl433_sensors(duration=30):
                 continue
             
         if not rtl433_path:
-            return readings, 'rtl_433 command not found in possible paths', non_weather_readings
+            return readings, 'rtl_433 command not found in possible paths', non_weather_readings, stats
        
         # Run rtl_433 with JSON output
         cmd = [
@@ -251,11 +306,21 @@ def read_rtl433_sensors(duration=30):
                 
                 model = data.get('model', 'Unknown')
                 sensor_id = data.get('id')
-                
-                if not data.get('temperature'):
+
+                stats['packets'] += 1
+                models_seen.add(str(model))
+
+                # Extract temperature first, accepting every field name a
+                # decoder might use. Only a packet with NO temperature at all
+                # is a non-weather device.
+                temp_c = extract_temp_c(data)
+
+                if temp_c is None:
                     sensor_name = f"{model}"
                     non_weather_readings[sensor_name] = data
                     continue
+
+                stats['temp_packets'] += 1
                
                 # FILTER: Only process sensors where model contains "Oria-"
                 if 'Oria-' in model and sensor_id:
@@ -264,13 +329,6 @@ def read_rtl433_sensors(duration=30):
                     continue
                 else:
                     sensor_name = f"{model}"
-               
-                # Extract temperature (prefer Celsius, but Oria uses 'temperature' field)
-                temp_c = data.get('temperature_C') or data.get('temperature')
-                if temp_c is None:
-                    temp_f = data.get('temperature_F')
-                    if temp_f is not None:
-                        temp_c = (temp_f - 32) * 5/9
                
                 if temp_c is not None:
                     # Update existing sensor or add new one (keeps latest reading)
@@ -288,19 +346,26 @@ def read_rtl433_sensors(duration=30):
                 print(f"  ! Error parsing line: {e}")
                 continue
        
+        stats['models'] = sorted(models_seen)[:10]
+
         if readings:
             print(f'[INFO] Found {len(readings)} sensor(s)')
         else:
-            print('[WARNING] No sensors detected during scan')
+            print(f"[WARNING] No temperature sensors decoded during scan "
+                  f"(heard {stats['packets']} packet(s) from: "
+                  f"{', '.join(stats['models']) or 'nothing at all'})")
        
-        return readings, None, non_weather_readings
+        return readings, None, non_weather_readings, stats
        
     except subprocess.TimeoutExpired:
-        return readings, 'RTL-433 command timed out', non_weather_readings
+        stats['models'] = sorted(models_seen)[:10]
+        return readings, 'RTL-433 command timed out', non_weather_readings, stats
     except FileNotFoundError:
-        return readings, 'rtl_433 command not found. Please install rtl_433.', non_weather_readings
+        stats['models'] = sorted(models_seen)[:10]
+        return readings, 'rtl_433 command not found. Please install rtl_433.', non_weather_readings, stats
     except Exception as e:
-        return readings, f'Error reading RTL-433 sensors: {e}', non_weather_readings
+        stats['models'] = sorted(models_seen)[:10]
+        return readings, f'Error reading RTL-433 sensors: {e}', non_weather_readings, stats
 
 def get_location_from_ip():
     """Get location information based on public IP address"""
@@ -533,6 +598,19 @@ def log_to_firebase(ds18b20_readings, rf_readings, weather_info=None):
         print(f"[ERROR] Failed to log to Firebase: {e}")
         return False
     
+def log_diagnostics_to_firebase(diag):
+    """Write a single, always-overwritten snapshot of what the Pi is hearing.
+
+    This is the node to look at when readings stop: it separates "the SDR is
+    deaf" (rf_packets 0) from "the SDR hears the neighborhood but none of our
+    sensors" (rf_packets > 0, rf_sensors 0) from "wired sensors are failing"
+    (ds18b20_ok < ds18b20_total) — without needing to SSH into the Pi.
+    """
+    try:
+        db.reference('/water-heater-user/diagnostics').set(diag)
+    except Exception as e:
+        print(f'[ERROR] Failed to write diagnostics to Firebase: {e}')
+
 def log_nonweather_to_firebase(rf_nonweather):
     """Log bad sensor data to Firebase Realtime Database with timestamp as document name
    
@@ -658,6 +736,7 @@ def main():
 
     consecutive_failures = 0  # Drives the post-failure back-off
     consecutive_empty = 0     # Cycles in a row with zero sensor data (SDR watchdog)
+    last_data_unix = None     # When we last got a real reading (for diagnostics)
     process_start = int(time.time())  # For honoring remote restart requests
 
     while True:
@@ -684,8 +763,9 @@ def main():
             # Step 2: Read RF 433MHz sensors (continue even if it fails)
             rf_readings = {}
             rf_nonweather = {}
+            rf_stats = {'packets': 0, 'temp_packets': 0, 'models': [], 'scan_seconds': RTL_SCAN_DURATION}
             try:
-                rf_readings, rf_error, rf_nonweather = read_rtl433_sensors(duration=RTL_SCAN_DURATION)
+                rf_readings, rf_error, rf_nonweather, rf_stats = read_rtl433_sensors(duration=RTL_SCAN_DURATION)
                 if rf_error:
                     cycle_errors.append(f"RF read failed: {rf_error}")
                     print(f"[ERROR] RF read failed: {rf_error}")
@@ -711,18 +791,57 @@ def main():
             # sensor values — so it doubles as a heartbeat: the dashboard can
             # tell the Pi is alive/online, and reliability is measurable against
             # the number of cycles that were expected.
-            got_data = bool(ds18b20_readings) or bool(rf_readings) or bool(rf_nonweather)
+            # "Data" means at least one real temperature value. Sensors whose
+            # read failed (None) and 433MHz chatter from devices that aren't
+            # thermometers (rf_nonweather) are NOT data — counting them is what
+            # let the monitor report healthy cycles for weeks while every
+            # reading row went out empty.
+            ds18b20_ok = numeric_readings(ds18b20_readings)
+            got_data = bool(ds18b20_ok) or bool(rf_readings)
+
+            # Update the health counters up front so the diagnostics snapshot
+            # written below reflects this cycle, not the previous one.
+            if got_data:
+                consecutive_empty = 0
+                last_data_unix = int(time.time())
+            else:
+                consecutive_empty += 1
+
+            if ds18b20_readings and not ds18b20_ok:
+                cycle_errors.append('Every wired sensor failed to read')
+
             try:
                 log_to_firebase(ds18b20_readings, rf_readings, weather_info)
                 if rf_nonweather:
                     log_nonweather_to_firebase(rf_nonweather)
                 if not got_data:
-                    cycle_errors.append("No sensor readings available")
-                    print("[WARNING] No sensor readings available this cycle")
+                    cycle_errors.append(f"No sensor readings available ({diagnose_no_data(ds18b20_readings, rf_stats)})")
+                    print(f"[WARNING] No sensor readings available this cycle — "
+                          f"{diagnose_no_data(ds18b20_readings, rf_stats)} "
+                          f"(RF packets: {rf_stats.get('packets', 0)}, "
+                          f"models: {', '.join(rf_stats.get('models', [])) or 'none'})")
             except Exception as e:
                 error_msg = f"Sensor logging failed: {e}"
                 cycle_errors.append(error_msg)
                 print(f"[ERROR] {error_msg}")
+
+            # Step 4b: Publish diagnostics so a silent failure is visible in
+            # the dashboard instead of only in journald on the Pi.
+            log_diagnostics_to_firebase({
+                'unix_timestamp': int(time.time()),
+                'timestamp': datetime.now().isoformat(),
+                'ds18b20_total': len(ds18b20_readings),
+                'ds18b20_ok': len(ds18b20_ok),
+                'rf_packets': rf_stats.get('packets', 0),
+                'rf_temp_packets': rf_stats.get('temp_packets', 0),
+                'rf_sensors': len(rf_readings),
+                'rf_models': rf_stats.get('models', []),
+                'rf_scan_seconds': rf_stats.get('scan_seconds', RTL_SCAN_DURATION),
+                'got_data': got_data,
+                'consecutive_empty': consecutive_empty,
+                'last_data_unix': last_data_unix,
+                'diagnosis': 'ok' if got_data else diagnose_no_data(ds18b20_readings, rf_stats),
+            })
            
             # Step 5: Log weather to Firebase (continue even if it fails)
             try:
@@ -754,16 +873,26 @@ def main():
             # always means the RTL-SDR has wedged (a known failure after hours of
             # use). Exit so systemd restarts us with a fresh SDR instead of
             # silently logging nothing until the next manual restart.
-            if got_data:
-                consecutive_empty = 0
-            else:
-                consecutive_empty += 1
+            if not got_data:
+                heard_something = rf_stats.get('packets', 0) > 0
                 if consecutive_empty >= EMPTY_RESTART_AFTER:
-                    log_to_db('ERROR', f'No sensor data for {consecutive_empty} cycles — '
-                              'restarting to reset the SDR')
-                    print(f'[ERROR] Watchdog: no data for {consecutive_empty} cycles, '
-                          'exiting to trigger a systemd restart.')
-                    sys.exit(1)
+                    if heard_something:
+                        # The receiver is decoding other 433MHz traffic, so the
+                        # SDR is fine — restarting would just churn. The sensors
+                        # themselves (batteries, range) or their decoder is the
+                        # problem, so say that instead.
+                        log_to_db_throttled('ERROR',
+                            'No sensor data for hours, but the RF receiver is still decoding other '
+                            '433MHz traffic — the SDR is fine; check sensor batteries/range (see diagnostics).',
+                            throttle_secs=ERROR_LOG_THROTTLE)
+                        print('[ERROR] Watchdog: no sensor data, but the receiver is hearing '
+                              'other traffic — not restarting (see /diagnostics).')
+                    else:
+                        log_to_db('ERROR', f'No sensor data for {consecutive_empty} cycles and the '
+                                  'receiver heard nothing at all — restarting to reset the SDR')
+                        print(f'[ERROR] Watchdog: no data for {consecutive_empty} cycles, '
+                              'exiting to trigger a systemd restart.')
+                        sys.exit(1)
 
             # Pace the loop. A healthy RF scan already used most of CYCLE_TARGET,
             # so we sleep the small remainder. If reads failed fast, we sleep the

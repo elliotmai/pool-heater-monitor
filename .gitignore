@@ -26,3 +26,6 @@ yarn-error.log*
 # Firebase service account key - SECRET, never commit. Lives only on the Pi.
 pi-files/water-heater-sensors-firebase-adminsdk-*.json
 pi-files/*firebase-adminsdk*.json
+# Python bytecode (pi-files)
+__pycache__/
+*.pyc

@@ -388,6 +388,21 @@ export const requestPiRestart = async () => {
 };
 
 /**
+ * Fetch the Pi's latest self-diagnostics (what the receiver actually heard on
+ * its last cycle). Null when the Pi hasn't written one yet — older Pi builds
+ * don't publish this node.
+ */
+export const fetchDiagnostics = async () => {
+  try {
+    const snapshot = await get(ref(database, `${BASE}/diagnostics`));
+    return snapshot.exists() ? snapshot.val() : null;
+  } catch (error) {
+    console.error('Diagnostics fetch error:', error);
+    return null;
+  }
+};
+
+/**
  * Fetch all-time records (min/max per sensor + when).
  */
 export const fetchRecords = async () => {
@@ -406,10 +421,22 @@ export const fetchRecords = async () => {
  * Smallest payload to render the Overview fast on first paint.
  */
 export const fetchInitialData = async () => {
-  const [sensorConfig, latest] = await Promise.all([fetchSensorConfig(), fetchLatestData()]);
+  const [sensorConfig, latest, diagnostics] = await Promise.all([
+    fetchSensorConfig(),
+    fetchLatestData(),
+    fetchDiagnostics(),
+  ]);
   const updatedSensorConfig = await discoverAndEnsureSensors(latest, sensorConfig);
-  return { latest, sensorConfig: updatedSensorConfig };
+  return { latest, sensorConfig: updatedSensorConfig, diagnostics };
 };
+
+/**
+ * How many sensors reported a real value in this snapshot? A reading row is
+ * still written every cycle as a heartbeat, so "the Pi is alive" and "sensors
+ * are reporting" are different questions — this answers the second one.
+ */
+export const countReportingSensors = (latest) =>
+  latest ? Object.keys(latest).filter(key => isSensorKey(key, latest[key])).length : 0;
 
 /**
  * Larger payloads for Trends and Logs. `range` selects which tier historical

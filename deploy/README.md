@@ -88,3 +88,35 @@ journalctl -u pi-deploy.service -n 20 --no-pager   # deploy history
 
 Edit files in `pi-files/`, commit, push. Within a minute the Pi updates itself.
 Force an immediate run: `sudo systemctl start pi-deploy.service`.
+
+## When readings stop (but the Pi still looks online)
+
+The Pi writes a reading row every cycle even when no sensor reported, so a
+heartbeat and fresh weather do **not** mean the sensors are working. Start with
+`/water-heater-user/diagnostics` in the Realtime Database — the Pi overwrites it
+every cycle:
+
+| Field | Meaning |
+| --- | --- |
+| `rf_packets` | 433MHz packets the receiver decoded this scan (any device) |
+| `rf_temp_packets` | how many of those carried a temperature |
+| `rf_sensors` | how many sensors ended up in the reading |
+| `rf_models` | which device models were heard (up to 10) |
+| `ds18b20_ok` / `ds18b20_total` | wired sensors that read successfully / present |
+| `diagnosis` | `ok`, or a one-line reason there was no data |
+| `last_data_unix` | when a real reading last landed |
+
+Read it like this:
+
+- **`rf_packets` is 0** — the receiver is deaf: SDR wedged, unplugged, or the
+  antenna is disconnected. The watchdog restarts the service after ~30 min of
+  this; if restarts don't help, reseat the dongle (`rtl_test -t`).
+- **`rf_packets` > 0 but `rf_temp_packets` is 0** — the SDR is fine and hearing
+  the neighborhood, but nothing is transmitting temperatures. Check the sensors'
+  batteries and range, and compare `rf_models` against what `rtl_433` calls your
+  sensors (`python3 ~/Desktop/test_rtl_sdr.py`). If a decoder renamed a model,
+  the `Oria-` filter in `read_rtl433_sensors` needs updating to match.
+- **`ds18b20_ok` < `ds18b20_total`** — wired probe wiring/power, not the SDR.
+
+The parsing itself is covered by `python3 pi-files/test_sensor_parsing.py`,
+which runs anywhere (no Pi hardware or Firebase needed).

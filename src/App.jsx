@@ -22,11 +22,20 @@ import Logs from './components/Logs';
 import Settings from './components/Settings';
 import LoadingScreen from './components/LoadingScreen';
 import WhatsNew from './components/WhatsNew';
-import { fetchInitialData, fetchBackgroundData } from './services/api';
+import { fetchInitialData, fetchBackgroundData, countReportingSensors } from './services/api';
 import { setSensorConfig } from './config/settingsUtils';
 import { CONFIG } from './config/config';
 import logo from './house-weather-logo-minimal.svg';
 import './App.css';
+
+/** "3 days" / "4 hours" / "25 minutes" — for how long sensors have been quiet. */
+const formatSilence = (seconds) => {
+  const days = Math.floor(seconds / 86400);
+  if (days >= 1) return `${days} day${days === 1 ? '' : 's'}`;
+  const hours = Math.floor(seconds / 3600);
+  if (hours >= 1) return `${hours} hour${hours === 1 ? '' : 's'}`;
+  return `${Math.max(1, Math.round(seconds / 60))} minutes`;
+};
 
 function App() {
   const [currentTab, setCurrentTab] = useState(0);
@@ -35,7 +44,8 @@ function App() {
     latest: null,
     historical: [],
     logs: [],
-    sensorConfig: {}
+    sensorConfig: {},
+    diagnostics: null
   });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -54,6 +64,7 @@ function App() {
         ...prev,
         latest: initial.latest,
         sensorConfig: initial.sensorConfig,
+        diagnostics: initial.diagnostics,
       }));
       setSensorConfig(initial.sensorConfig);
       setLoading(false);
@@ -115,6 +126,17 @@ function App() {
   const minsAgo = lastReadingSec ? Math.round((Date.now() / 1000 - lastReadingSec) / 60) : null;
   const piOffline = !loading && (!lastReadingSec || minsAgo > 16);
 
+  // The heartbeat and the sensors are separate failures: the Pi can keep
+  // writing rows (and weather) for weeks while not one sensor reports. That
+  // used to look completely healthy here, so call it out on its own.
+  const reportingSensors = countReportingSensors(data.latest);
+  const lastSensorSec = Object.values(data.sensorConfig || {})
+    .reduce((newest, cfg) => Math.max(newest, cfg?.lastSeen || 0), 0) || null;
+  const sensorsSilent = !loading && !piOffline && reportingSensors === 0;
+  const sensorsSilentFor = lastSensorSec
+    ? formatSilence(Date.now() / 1000 - lastSensorSec)
+    : null;
+
   if (loading) {
     return <LoadingScreen />;
   }
@@ -169,6 +191,16 @@ function App() {
               {lastReadingSec
                 ? `No data from the Pi for ${minsAgo} min (last reading ${new Date(data.latest.timestamp).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}). It's likely off power or internet.`
                 : 'No readings received yet — the Pi may be off power or internet.'}
+            </Alert>
+          </Box>
+        )}
+        {sensorsSilent && (
+          <Box sx={{ p: 2, pb: 0 }}>
+            <Alert severity="warning">
+              {`The Pi is online, but no sensor has reported${sensorsSilentFor ? ` in ${sensorsSilentFor}` : ' yet'} — the readings you see are only weather.`}
+              {data.diagnostics?.diagnosis && data.diagnostics.diagnosis !== 'ok'
+                ? ` Pi reports: ${data.diagnostics.diagnosis}.`
+                : ''}
             </Alert>
           </Box>
         )}
