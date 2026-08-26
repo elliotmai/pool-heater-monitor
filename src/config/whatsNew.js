@@ -12,6 +12,14 @@
  */
 export const WHATS_NEW = [
   {
+    version: '2026.08.26',
+    date: 'August 2026',
+    items: [
+      '🔌 New “Reset Receiver (USB)” button — the software version of unplugging and replugging the sensor dongle, so a stuck receiver no longer means a trip to the Pi. It tells you which step fixed it.',
+      '🩺 When the receiver goes deaf, the Pi now resets the dongle itself instead of just restarting — and if the dongle is fine but nothing is being heard, it says to check the antenna and sensors rather than sending you out to replug it.',
+    ],
+  },
+  {
     version: '2026.08.21',
     date: 'August 2026',
     items: [

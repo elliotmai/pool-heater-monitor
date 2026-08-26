@@ -405,6 +405,48 @@ export const fetchRestartStatus = async () => {
 };
 
 /**
+ * Ask the Pi to recover the RTL-SDR at the USB level — the software equivalent
+ * of unplugging and replugging it. Worth reaching for when the receiver is deaf
+ * and "Restart Monitor" changes nothing: a restart reopens the same wedged
+ * dongle, and so does rebooting the Pi, because its USB ports stay powered.
+ *
+ * The Pi picks this up once per cycle, works through an escalating ladder
+ * (port reset → rebind → reauthorize → cut the port's power) and writes back
+ * which step worked.
+ */
+export const requestSdrReset = async () => {
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    await set(ref(database, `${BASE}/commands/reset_sdr`), {
+      requested_at: now,
+      requested_by: 'dashboard',
+      status: 'requested',
+    });
+    return true;
+  } catch (error) {
+    console.error('Error requesting SDR reset:', error);
+    return false;
+  }
+};
+
+/**
+ * State of the last remote SDR reset.
+ *   status 'requested' — written by the dashboard, not seen by the Pi yet
+ *   status 'running'   — the Pi picked it up and is working the ladder
+ *   status 'completed' — a step brought the receiver back (summary says which)
+ *   status 'failed'    — every step was tried and the receiver is still dead
+ */
+export const fetchSdrResetStatus = async () => {
+  try {
+    const snapshot = await get(ref(database, `${BASE}/commands/reset_sdr`));
+    return snapshot.exists() ? snapshot.val() : null;
+  } catch (error) {
+    console.error('SDR reset status fetch error:', error);
+    return null;
+  }
+};
+
+/**
  * Fetch the Pi's latest self-diagnostics (what the receiver actually heard on
  * its last cycle). Null when the Pi hasn't written one yet — older Pi builds
  * don't publish this node.

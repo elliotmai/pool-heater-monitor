@@ -9,6 +9,14 @@ from datetime import datetime
 import firebase_admin
 from firebase_admin import credentials, db
 
+# USB-level recovery for a wedged SDR. Optional on purpose: a Pi running an
+# older deploy simply won't have the file yet, and the monitor must still boot.
+try:
+    import sdr_recovery
+except Exception as e:
+    sdr_recovery = None
+    print(f'[WARNING] sdr_recovery.py not available ({e}); USB recovery is disabled')
+
 # Initialize the DS18B20 sensors
 os.system('modprobe w1-gpio')
 os.system('modprobe w1-therm')
@@ -84,24 +92,46 @@ def load_sensor_mappings():
 
 SENSOR_NAMES = load_sensor_mappings()
 
+def claim_command(name, claiming_status, newer_than=0):
+    """Claim a pending dashboard command, or return None if there isn't one.
+
+    "Pending" means the request is newer than both the last time we handled
+    this command and `newer_than`. Stamping handled_at as we claim it is what
+    makes a command fire exactly once: re-reading the same node next cycle
+    finds nothing new, so nothing loops.
+    """
+    try:
+        ref = db.reference(f'/water-heater-user/commands/{name}')
+        cmd = ref.get()
+        if not isinstance(cmd, dict):
+            return None
+        requested_at = cmd.get('requested_at') or 0
+        if requested_at <= max(cmd.get('handled_at') or 0, newer_than):
+            return None
+        # Acknowledge so the dashboard can reflect that it was picked up.
+        ref.update({'status': claiming_status, 'handled_at': int(time.time())})
+        return cmd
+    except Exception as e:
+        print(f"[WARNING] {name}-command check failed: {e}")
+        return None
+
+
+def finish_command(name, **fields):
+    """Write the outcome of a command back so the dashboard can show it."""
+    try:
+        db.reference(f'/water-heater-user/commands/{name}').update(
+            dict(fields, completed_at=int(time.time())))
+    except Exception as e:
+        print(f'[WARNING] Could not record the outcome of {name}: {e}')
+
+
 def restart_requested(process_start):
     """Return True if the dashboard has requested a restart since we started.
 
     We only honor requests newer than this process's start time, so after we
     restart the same request won't trigger us again (no restart loop).
     """
-    try:
-        cmd = db.reference('/water-heater-user/commands/restart').get()
-        if isinstance(cmd, dict) and (cmd.get('requested_at') or 0) > process_start:
-            # Acknowledge so the dashboard can reflect that it was picked up.
-            db.reference('/water-heater-user/commands/restart').update({
-                'status': 'restarting',
-                'handled_at': int(time.time()),
-            })
-            return True
-    except Exception as e:
-        print(f"[WARNING] Restart-command check failed: {e}")
-    return False
+    return claim_command('restart', 'restarting', newer_than=process_start) is not None
 
 def complete_restart_command():
     """Close the loop on a dashboard-requested restart.
@@ -119,6 +149,79 @@ def complete_restart_command():
             print('[INFO] Acknowledged completion of the requested restart.')
     except Exception as e:
         print(f'[WARNING] Could not mark restart complete: {e}')
+
+
+SDR_PROBE_SECONDS = 30      # How long to listen when checking whether a
+                            # recovery step actually brought the receiver back.
+
+
+def run_sdr_recovery(reason, accept_silent=True):
+    """Try to bring a wedged RTL-SDR back at the USB level, and publish what happened.
+
+    This exists because the obvious remedies don't work on this failure:
+    restarting the service reopens the same wedged device, and even rebooting
+    the Pi leaves it wedged, because the USB ports stay powered across a soft
+    reboot. Re-enumerating or power-cycling the port is the only thing that
+    reproduces the unplug/replug that does work — see sdr_recovery.py.
+
+    Returns the recovery record (or None if recovery isn't installed), and
+    never raises: a failed recovery must not take the monitor down with it.
+    """
+    if sdr_recovery is None:
+        log_to_db('ERROR', 'SDR recovery was needed but sdr_recovery.py is not deployed on '
+                           'the Pi — see deploy/README.md to install it.')
+        print('[ERROR] sdr_recovery.py is not available; cannot attempt USB recovery.')
+        return None
+
+    print(f'[INFO] Attempting USB-level SDR recovery ({reason})...')
+    log_to_db('INFO', f'Attempting USB-level SDR recovery ({reason})')
+
+    try:
+        record = sdr_recovery.recover(probe_seconds=SDR_PROBE_SECONDS,
+                                      accept_silent=accept_silent)
+    except Exception as e:
+        log_to_db('ERROR', f'SDR recovery itself failed: {e}')
+        print(f'[ERROR] SDR recovery raised: {e}')
+        return None
+
+    record['reason'] = reason
+    print(f"[INFO] SDR recovery: {record['summary']}")
+    log_to_db('INFO' if record.get('recovered') else 'ERROR',
+              f"SDR recovery ({reason}): {record['summary']}")
+
+    # Its own node, not /diagnostics: diagnostics is overwritten every cycle,
+    # and the last recovery attempt is exactly what you want to still be able
+    # to read hours later.
+    try:
+        db.reference('/water-heater-user/sdr_recovery').set(record)
+    except Exception as e:
+        print(f'[WARNING] Could not publish the SDR recovery record: {e}')
+
+    return record
+
+
+def handle_sdr_reset_command():
+    """Run USB recovery on demand when the dashboard asks for it.
+
+    The watchdog gets there on its own eventually, but only after ~30 minutes
+    of dead cycles. This is the button for when you already know it's stuck and
+    don't want to wait — or to walk out to the Pi.
+    """
+    cmd = claim_command('reset_sdr', 'running')
+    if cmd is None:
+        return
+
+    record = run_sdr_recovery('requested from dashboard')
+    if record is None:
+        finish_command('reset_sdr', status='failed',
+                       summary='USB recovery is not installed on the Pi (see deploy/README.md).')
+        return
+
+    finish_command('reset_sdr',
+                   status='completed' if record.get('recovered') else 'failed',
+                   summary=record.get('summary', ''),
+                   steps=[{'step': a['step'], 'ok': a['ok'], 'detail': a['detail']}
+                          for a in record.get('attempts', [])])
 
 base_dir = '/sys/bus/w1/devices/'
 
@@ -770,6 +873,11 @@ def main():
             print('[INFO] Restart requested from dashboard, exiting to restart.')
             sys.exit(0)
 
+        # A restart reopens the same wedged dongle, so the dashboard has a
+        # second button that resets the USB device itself. Handled in-process:
+        # unlike a restart, we stay up and can report the outcome directly.
+        handle_sdr_reset_command()
+
         try:
             # Step 1: Read DS18B20 wired sensors (continue even if it fails)
             ds18b20_readings = {}
@@ -908,11 +1016,26 @@ def main():
                         print('[ERROR] Watchdog: no sensor data, but the receiver is hearing '
                               'other traffic — not restarting (see /diagnostics).')
                     else:
-                        log_to_db('ERROR', f'No sensor data for {consecutive_empty} cycles and the '
-                                  'receiver heard nothing at all — restarting to reset the SDR')
-                        print(f'[ERROR] Watchdog: no data for {consecutive_empty} cycles, '
-                              'exiting to trigger a systemd restart.')
-                        sys.exit(1)
+                        # The receiver is deaf. Try the USB device itself first:
+                        # restarting the process (what we used to do here) just
+                        # reopens the same wedged dongle, which is why this
+                        # failure used to need someone to walk out and replug it.
+                        # accept_silent=False: we got here only because the
+                        # receiver heard nothing across many minutes of
+                        # listening, so "opens but decoded nothing in 30s" is
+                        # not evidence of a fix — keep climbing to the power cut.
+                        record = run_sdr_recovery(f'no sensor data for {consecutive_empty} cycles',
+                                                  accept_silent=False)
+                        if record and record.get('recovered'):
+                            # Give the revived dongle a clean run of cycles
+                            # before the watchdog is allowed to fire again.
+                            consecutive_empty = 0
+                        else:
+                            log_to_db('ERROR', f'No sensor data for {consecutive_empty} cycles and USB '
+                                      'recovery did not bring the receiver back — restarting the service')
+                            print(f'[ERROR] Watchdog: no data for {consecutive_empty} cycles and USB '
+                                  'recovery failed, exiting to trigger a systemd restart.')
+                            sys.exit(1)
 
             # Pace the loop. A healthy RF scan already used most of CYCLE_TARGET,
             # so we sleep the small remainder. If reads failed fast, we sleep the

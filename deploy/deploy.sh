@@ -59,6 +59,23 @@ echo "Syncing pi-files/ -> $DEST"
 # files already on the Desktop (including that key) are left in place.
 rsync -av --exclude='*firebase-adminsdk*.json' "$REPO_DIR/pi-files/" "$DEST/"
 
+# The USB recovery helper runs as root, so the copy that matters is the
+# root-owned one in /usr/local/sbin — which this unprivileged deploy cannot
+# replace. Say so loudly rather than leaving a stale helper in place silently:
+# a monitor that thinks it can recover the SDR and can't is worse than one that
+# knows it can't.
+RECOVERY_SRC="$REPO_DIR/pi-files/sdr_recovery.py"
+RECOVERY_INSTALLED="/usr/local/sbin/sdr_recovery.py"
+if [ -f "$RECOVERY_SRC" ]; then
+    if [ ! -f "$RECOVERY_INSTALLED" ]; then
+        echo "WARNING: $RECOVERY_INSTALLED is missing — remote SDR recovery is disabled."
+        echo "         Install it: sudo install -m 0755 -o root -g root '$RECOVERY_SRC' '$RECOVERY_INSTALLED'"
+    elif ! cmp -s "$RECOVERY_SRC" "$RECOVERY_INSTALLED"; then
+        echo "WARNING: $RECOVERY_INSTALLED is out of date (needs root to update)."
+        echo "         Refresh it: sudo install -m 0755 -o root -g root '$RECOVERY_SRC' '$RECOVERY_INSTALLED'"
+    fi
+fi
+
 echo "Restarting pool-monitor.service"
 sudo systemctl restart pool-monitor.service
 

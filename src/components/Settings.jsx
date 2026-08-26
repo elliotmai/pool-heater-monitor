@@ -24,9 +24,17 @@ import {
   Save,
   Refresh,
   RestartAlt,
+  UsbOff,
   // CloudSync
 } from '@mui/icons-material';
-import { updateSensorConfig, logSensorEvent, requestPiRestart, fetchRestartStatus } from '../services/api';
+import {
+  updateSensorConfig,
+  logSensorEvent,
+  requestPiRestart,
+  fetchRestartStatus,
+  requestSdrReset,
+  fetchSdrResetStatus,
+} from '../services/api';
 
 const fmtTime = (unixSec) =>
   new Date(unixSec * 1000).toLocaleString('en-US', {
@@ -57,6 +65,44 @@ const describeRestart = (cmd) => {
   return { text: `${requested} — waiting for the Pi to pick it up (checks once a cycle).`, severity: 'info' };
 };
 
+/**
+ * Plain-language state of the last USB reset. The Pi reports which step in the
+ * ladder worked, so this can say what actually fixed things rather than just
+ * "done" — and, when nothing did, that the dongle really does need hands on it.
+ */
+const describeSdrReset = (cmd) => {
+  if (!cmd || !cmd.requested_at) return null;
+  const requested = `Requested ${fmtTime(cmd.requested_at)}`;
+  const done = cmd.completed_at && cmd.completed_at >= cmd.requested_at;
+  if (done) {
+    return {
+      text: `${requested} — ${cmd.summary || 'finished'}`,
+      severity: cmd.status === 'completed' ? 'success' : 'error',
+    };
+  }
+  if (cmd.handled_at && cmd.handled_at >= cmd.requested_at) {
+    // The ladder takes a few minutes at most. Much longer than that and the
+    // monitor died partway through, which is worth saying rather than leaving
+    // "working on it" on screen indefinitely.
+    const runningMins = (Date.now() / 1000 - cmd.handled_at) / 60;
+    if (runningMins > 20) {
+      return {
+        text: `${requested} — the Pi started the reset but never reported back, so it stopped partway through. Try again.`,
+        severity: 'warning',
+      };
+    }
+    return { text: `${requested} — the Pi is working through the reset steps.`, severity: 'info' };
+  }
+  const waitedMins = (Date.now() / 1000 - cmd.requested_at) / 60;
+  if (waitedMins > 12) {
+    return {
+      text: `${requested} — never picked up (${Math.round(waitedMins)} min ago). The monitor isn't reading commands, so it isn't looping.`,
+      severity: 'warning',
+    };
+  }
+  return { text: `${requested} — waiting for the Pi to pick it up (checks once a cycle).`, severity: 'info' };
+};
+
 const Settings = ({ sensorConfig, onRefresh }) => {
   const [settings, setSettings] = useState({});
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
@@ -65,15 +111,20 @@ const Settings = ({ sensorConfig, onRefresh }) => {
   const [restartOpen, setRestartOpen] = useState(false);
   const [restartCmd, setRestartCmd] = useState(null);
   const restartPoll = useRef(null);
+  const [sdrOpen, setSdrOpen] = useState(false);
+  const [sdrCmd, setSdrCmd] = useState(null);
+  const sdrPoll = useRef(null);
 
   // Show the outcome of the last restart request (if any) on open, and never
   // leave the follow-up poll running after this tab goes away.
   useEffect(() => {
     let cancelled = false;
     fetchRestartStatus().then(cmd => { if (!cancelled) setRestartCmd(cmd); });
+    fetchSdrResetStatus().then(cmd => { if (!cancelled) setSdrCmd(cmd); });
     return () => {
       cancelled = true;
       if (restartPoll.current) clearInterval(restartPoll.current);
+      if (sdrPoll.current) clearInterval(sdrPoll.current);
     };
   }, []);
 
@@ -177,6 +228,34 @@ const Settings = ({ sensorConfig, onRefresh }) => {
     }, 15000);
   };
 
+  const handleSdrReset = async () => {
+    setSdrOpen(false);
+    const ok = await requestSdrReset();
+    setSnackbar({
+      open: true,
+      message: ok
+        ? 'USB reset requested — the Pi will work through the reset steps and report back below.'
+        : 'Failed to send the USB reset request.',
+      severity: ok ? 'info' : 'error',
+    });
+    if (!ok) return;
+
+    // The ladder itself takes a couple of minutes on top of the Pi's ~5-min
+    // command check, so poll a little longer than the restart flow does.
+    setSdrCmd(await fetchSdrResetStatus());
+    const started = Date.now();
+    if (sdrPoll.current) clearInterval(sdrPoll.current);
+    sdrPoll.current = setInterval(async () => {
+      const cmd = await fetchSdrResetStatus();
+      setSdrCmd(cmd);
+      const done = cmd?.completed_at && cmd.completed_at >= cmd.requested_at;
+      if (done || Date.now() - started > 15 * 60 * 1000) {
+        clearInterval(sdrPoll.current);
+        sdrPoll.current = null;
+      }
+    }, 15000);
+  };
+
   const handleRefresh = async () => {
     if (onRefresh) {
       await onRefresh();
@@ -189,6 +268,7 @@ const Settings = ({ sensorConfig, onRefresh }) => {
   };
 
   const restartStatus = describeRestart(restartCmd);
+  const sdrStatus = describeSdrReset(sdrCmd);
   const sensorEntries = Object.entries(settings);
   const enabledSensors = sensorEntries.filter(([_, config]) => config.enabled !== false);
   const disabledSensors = sensorEntries.filter(([_, config]) => config.enabled === false);
@@ -474,6 +554,30 @@ const Settings = ({ sensorConfig, onRefresh }) => {
               {restartStatus.text}
             </Alert>
           )}
+
+          <Divider sx={{ my: 2 }} />
+
+          <Typography variant="body2" sx={{ fontSize: '12px', color: '#8e8e93', mb: 1.5 }}>
+            If no sensor is reporting and a restart doesn't help, reset the receiver itself.
+            This is the software version of unplugging and replugging the USB dongle — which a
+            restart, and even a reboot, can't do because the Pi keeps its USB ports powered.
+          </Typography>
+          <Button
+            variant="outlined"
+            startIcon={<UsbOff />}
+            onClick={() => setSdrOpen(true)}
+            sx={{
+              borderColor: '#af52de', color: '#af52de', textTransform: 'none', fontWeight: 600,
+              '&:hover': { borderColor: '#af52de', bgcolor: 'rgba(175, 82, 222, 0.05)' },
+            }}
+          >
+            Reset Receiver (USB)
+          </Button>
+          {sdrStatus && (
+            <Alert severity={sdrStatus.severity} sx={{ mt: 1.5, fontSize: '12px', py: 0.5 }}>
+              {sdrStatus.text}
+            </Alert>
+          )}
         </CardContent>
       </Card>
 
@@ -544,6 +648,23 @@ const Settings = ({ sensorConfig, onRefresh }) => {
         <DialogActions>
           <Button onClick={() => setRestartOpen(false)} sx={{ textTransform: 'none', color: '#8e8e93' }}>Cancel</Button>
           <Button onClick={handleRestart} sx={{ textTransform: 'none', fontWeight: 600, color: '#ff9500' }}>Restart</Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* USB reset confirmation */}
+      <Dialog open={sdrOpen} onClose={() => setSdrOpen(false)}>
+        <DialogTitle sx={{ fontSize: '17px', fontWeight: 600 }}>Reset the receiver?</DialogTitle>
+        <DialogContent>
+          <DialogContentText sx={{ fontSize: '14px' }}>
+            The Pi will try increasingly forceful ways to revive the USB dongle — a port reset
+            first, then a full reconnect, and finally cutting power to the port — stopping as soon
+            as the receiver starts hearing sensors again. It reports which step worked. Readings
+            pause for a few minutes, and this only works while the Pi is online.
+          </DialogContentText>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setSdrOpen(false)} sx={{ textTransform: 'none', color: '#8e8e93' }}>Cancel</Button>
+          <Button onClick={handleSdrReset} sx={{ textTransform: 'none', fontWeight: 600, color: '#af52de' }}>Reset</Button>
         </DialogActions>
       </Dialog>
 
