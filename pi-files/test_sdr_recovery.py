@@ -38,6 +38,18 @@ UHUBCTL_OLD_NO_FLAGS = """Current status for hub 1 [1d6b:0002 Linux xhci-hcd xHC
   Port 1: 0503 power highspeed enable connect [0bda:2838 Realtek RTL2838UHIDIR SN: 00000001]
 """
 
+# A real Raspberry Pi 4 (astraPi). Every external socket sits behind a built-in
+# VIA hub that uhubctl will not control, so the dongle never appears in the
+# listing — only the root hubs do. Cutting root hub 1 port 1 still power-cycles
+# it, verified on the hardware: both the VIA hub and the dongle came back with
+# new device numbers. Finding that path is what locate_in_hubs has to do.
+UHUBCTL_PI4 = """Current status for hub 2 [1d6b:0003 Linux 5.10.17-v7l+ xhci-hcd xHCI Host Controller 0000:01:00.0, USB 3.00, 4 ports]
+  Port 1: 02a0 power 5gbps Rx.Detect
+  Port 2: 02a0 power 5gbps Rx.Detect
+Current status for hub 1 [1d6b:0002 Linux 5.10.17-v7l+ xhci-hcd xHCI Host Controller 0000:01:00.0, USB 2.00, 1 ports]
+  Port 1: 0503 power highspeed enable connect [2109:3431 USB2.0 Hub, USB 2.10, 4 ports]
+"""
+
 
 class Fake:
     """Swap module-level functions out for the duration of a test."""
@@ -90,7 +102,7 @@ def main():
             TimeoutExpired=Exception, CalledProcessError=Exception)):
         ok, detail = sdr_recovery.step_power('1-1.1')
     check('a hub that cannot switch power says so instead of pretending',
-          not ok and 'ppps' in detail)
+          not ok and 'cannot be cut in software' in detail)
 
     # An old uhubctl reports no capabilities at all. Listing a hub is uhubctl's
     # own statement that it can control it, so that must not be misread as "no".
@@ -103,6 +115,44 @@ def main():
           old_error is None and old_hubs[0]['switchable'] is True)
     check('...and it is recorded that the capability was never actually reported',
           old_hubs[0]['capability_reported'] is False)
+
+    # --- finding a power-cyclable hub on a Pi 4 ----------------------------
+    with Fake(subprocess=types.SimpleNamespace(
+            run=fake_run(UHUBCTL_PI4),
+            PIPE=-1, STDOUT=-2, DEVNULL=-3,
+            TimeoutExpired=Exception, CalledProcessError=Exception)):
+        pi4_hubs, pi4_error = sdr_recovery.uhubctl_survey()
+    check('the Pi 4 listing parses', pi4_error is None and len(pi4_hubs) == 2)
+    check('a dongle uhubctl cannot see is not found by USB id alone',
+          sdr_recovery.locate_in_hubs(pi4_hubs) == (None, None))
+    pi4_hub, pi4_port = sdr_recovery.locate_in_hubs(pi4_hubs, '1-1.2')
+    check('walking up the topology finds the root hub port that does cut power',
+          pi4_hub is not None and pi4_hub['location'] == '1' and pi4_port == 1)
+
+    # --- topology arithmetic ----------------------------------------------
+    check("a hub port id splits into (hub, port)",
+          sdr_recovery.parent_location_and_port('1-1.2') == ('1-1', '2'))
+    check('a device straight off a root hub names the bus as its hub',
+          sdr_recovery.parent_location_and_port('1-1') == ('1', '1'))
+    check('deep chains split at the last hop',
+          sdr_recovery.parent_location_and_port('1-1.4.2') == ('1-1.4', '2'))
+    check('a root hub port names the subtree below it',
+          sdr_recovery.subtree_root('1', 1) == '1-1')
+    check('a downstream hub port names the subtree below it',
+          sdr_recovery.subtree_root('1-1', 2) == '1-1.2')
+
+    # Cutting upstream takes the whole subtree down. The dongle itself is not
+    # "collateral"; anything else sharing the cut is, and must be named.
+    with Fake(list_usb_devices=lambda: [
+            {'port': '1-1', 'vid': '2109', 'pid': '3431', 'product': 'USB2.0 Hub',
+             'manufacturer': '', 'known_sdr': False},
+            {'port': '1-1.2', 'vid': '0bda', 'pid': '2838', 'product': 'RTL2838UHIDIR',
+             'manufacturer': '', 'known_sdr': True},
+            {'port': '2-1', 'vid': '1234', 'pid': '5678', 'product': 'Elsewhere',
+             'manufacturer': '', 'known_sdr': False}]):
+        also = sdr_recovery.collateral_devices('1', 1, '1-1.2')
+    check('everything under the cut point is reported as collateral',
+          [d['port'] for d in also] == ['1-1'])
 
     # --- probe classification ---------------------------------------------
     # Telling "opened but heard nothing" apart from "could not open the dongle"

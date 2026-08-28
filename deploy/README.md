@@ -172,16 +172,34 @@ python3 pi-files/test_sdr_recovery.py          # offline tests, runs anywhere
 
 ### Can this Pi actually cut USB power?
 
-The `power` rung is the only one equivalent to a physical replug, and it needs a
-hub that supports per-port power switching (`ppps` in `uhubctl`'s output). Plenty
-of Raspberry Pi models' built-in hubs don't. Run `--probe` once after install: it
-says `power cycling: available` or `NOT available` outright.
+**On astraPi (Pi 4B, Buster): yes — verified on the hardware.** Cycling root hub
+1 port 1 re-enumerated both the built-in VIA hub and the dongle, with new device
+numbers on each. The full ladder is real here.
 
-If it isn't available, the first three rungs still run and usually suffice. To
-make the last one real, put a **uhubctl-capable powered USB hub** between the Pi
-and the dongle and plug the SDR into that. A smart plug on the Pi's own power
-supply is the blunt alternative — it power-cycles the Pi *and* the dongle, which
-does clear the wedge, at the cost of rebooting everything.
+Getting there is less direct than it sounds, and the code has to walk for it.
+Every external socket on a Pi 4 sits behind a built-in `2109:3431` VIA hub that
+`uhubctl` will not control, so the dongle never appears in `uhubctl`'s listing
+at all — searching that listing for the dongle's USB id finds nothing and
+concludes, wrongly, that no power cut is possible. `locate_in_hubs` instead
+walks up the topology from the dongle's sysfs port (`1-1.2` → `1-1` → root hub
+`1` port 1) and takes the nearest ancestor `uhubctl` does control.
+
+The cost is bluntness: cutting one port up takes that port's whole subtree with
+it. On this Pi the subtree is just the VIA hub and the dongle, so nothing else
+is disturbed — but `--probe` and the recovery record both name whatever else
+would go down, because on another machine that could be a keyboard or a drive.
+
+Run `--probe` after install on any new hardware; it reports the target port and
+the collateral outright. If it says nothing upstream can be switched, the first
+three rungs still run and usually suffice. To make the last one real, put a
+**uhubctl-capable powered USB hub** between the Pi and the dongle. A smart plug
+on the Pi's own power supply is the blunt alternative — it power-cycles the Pi
+*and* the dongle, at the cost of rebooting everything.
+
+Note that Buster's `uhubctl` is 2.0.0 (2018), which prints no hub capability
+flags. Absent flags are not a "no": `uhubctl`'s default listing only includes
+hubs it believes it can control, so the code trusts the listing where the build
+reports no capabilities, and `--probe` marks that verdict `(assumed)`.
 
 ### Making it wedge less often
 

@@ -383,13 +383,81 @@ def uhubctl_survey():
     return hubs, None
 
 
-def locate_in_hubs(hubs):
-    """Find the (hub location, port number) our dongle is plugged into."""
+def parent_location_and_port(port_id):
+    """Split a sysfs USB port id into the hub holding it, and which port.
+
+    uhubctl names hubs the same way sysfs does, with one wrinkle: a root hub is
+    named by its bus number alone. So '1-1.2' hangs off hub '1-1' at port 2,
+    and '1-1' hangs off root hub '1' at port 1.
+    """
+    if '.' in port_id:
+        parent, _, port = port_id.rpartition('.')
+        return parent, port
+    bus, _, port = port_id.partition('-')
+    return bus, port
+
+
+def locate_in_hubs(hubs, device_port=None):
+    """Find the nearest hub uhubctl can actually power-cycle for our dongle.
+
+    The obvious approach - look for the dongle's own USB id among the ports
+    uhubctl lists - only works when it hangs directly off a controllable hub.
+    On a Pi 4 it doesn't: every external socket is behind a built-in VIA hub
+    that uhubctl won't control, so the dongle never appears in the listing at
+    all and the search comes up empty even though cutting power one level up
+    works perfectly well.
+
+    So walk up the topology instead, nearest first, and take the first ancestor
+    uhubctl does control - that keeps the cut as narrow as the hardware allows.
+    Returns (hub, port), or (None, None) if nothing upstream can be switched.
+    """
     for hub in hubs:
         for entry in hub['ports']:
-            if (entry['vid'], entry['pid']) in RTL_SDR_IDS:
+            if (entry['vid'], entry['pid']) in RTL_SDR_IDS and hub['switchable']:
                 return hub, entry['port']
+
+    if not device_port:
+        return None, None
+
+    by_location = {hub['location']: hub for hub in hubs}
+    current = device_port
+    seen = set()
+    while current and current not in seen:
+        seen.add(current)
+        parent, port = parent_location_and_port(current)
+        if not parent or not port:
+            break
+        hub = by_location.get(parent)
+        if hub and hub['switchable']:
+            return hub, int(port) if port.isdigit() else port
+        current = parent
+
     return None, None
+
+
+def subtree_root(hub_location, port):
+    """The sysfs port id of whatever hangs off `port` of `hub_location`."""
+    if '-' in hub_location:
+        return f'{hub_location}.{port}'
+    return f'{hub_location}-{port}'
+
+
+def collateral_devices(hub_location, port, device_port=None):
+    """Everything else that loses power when we cut this port.
+
+    Cutting one port up the tree takes its whole subtree down with it. On a Pi
+    4 that is the only option, so the answer is to name what goes with it
+    rather than to refuse - but it does have to be named.
+    """
+    root = subtree_root(hub_location, port)
+    affected = []
+    for entry in list_usb_devices():
+        if entry['port'] != root and not entry['port'].startswith(root + '.'):
+            continue
+        if entry['port'] == device_port or entry['known_sdr']:
+            continue
+        affected.append(entry)
+    return affected
 
 
 def step_power(port, delay=4):
@@ -404,20 +472,24 @@ def step_power(port, delay=4):
     if error:
         return False, error
 
-    hub, hub_port = locate_in_hubs(hubs)
+    device_port = port or (find_sdr() or {}).get('port') or recall_port()
+    hub, hub_port = locate_in_hubs(hubs, device_port)
     if hub is None:
         switchable = [h['location'] for h in hubs if h['switchable']]
         if not switchable:
-            return False, ('the dongle is not visible to uhubctl and no hub here supports '
-                           'per-port power switching, so its power cannot be cut in software')
-        return False, (f'the dongle is not visible to uhubctl; switchable hubs are '
-                       f'{", ".join(switchable)} - power it through one of those to make '
-                       'this recoverable remotely')
+            return False, ('no hub between the dongle and the root supports power switching, '
+                           'so its power cannot be cut in software')
+        return False, (f'nothing upstream of the dongle ({device_port or "location unknown"}) '
+                       f'can be power-cycled; switchable hubs are {", ".join(switchable)} - '
+                       'see deploy/README.md for the hardware fix')
 
-    if not hub['switchable']:
-        return False, (f'hub {hub["location"]} port {hub_port} holds the dongle but the hub '
-                       'has no per-port power switching (no "ppps"), so its power cannot be '
-                       'cut in software - see deploy/README.md for the hardware fix')
+    also = collateral_devices(hub['location'], hub_port, device_port)
+    note = ''
+    if also:
+        # Cutting upstream takes the whole subtree with it. Harmless on a Pi
+        # whose only USB device is the dongle, worth knowing about otherwise.
+        names = ', '.join(f"{d['vid']}:{d['pid']} {d['product'] or '(unnamed)'}" for d in also[:4])
+        note = f' (also power-cycles {len(also)} other device(s): {names})'
 
     cmd = ['uhubctl', '-l', hub['location'], '-p', str(hub_port), '-a', 'cycle', '-d', str(delay)]
     try:
@@ -431,9 +503,10 @@ def step_power(port, delay=4):
         return False, f'uhubctl exited {result.returncode}: {tail[0]}'
 
     # Re-enumeration after a power cut is slower than a rebind: the dongle has
-    # to boot its own firmware again before the kernel sees it.
+    # to boot its own firmware again before the kernel sees it, and it arrives
+    # with a new devnum, so callers must re-locate rather than reuse the old one.
     time.sleep(delay + 4)
-    return True, f'power-cycled hub {hub["location"]} port {hub_port} for {delay}s'
+    return True, f'power-cycled hub {hub["location"]} port {hub_port} for {delay}s{note}'
 
 
 STEPS = {
@@ -564,7 +637,8 @@ def describe_environment():
     """
     device = find_sdr()
     hubs, hub_error = uhubctl_survey()
-    hub, hub_port = locate_in_hubs(hubs)
+    device_port = device['port'] if device else recall_port()
+    hub, hub_port = locate_in_hubs(hubs, device_port)
     return {
         'device': device,
         'remembered_port': recall_port(),
@@ -577,6 +651,8 @@ def describe_environment():
         'dongle_hub': hub['location'] if hub else None,
         'dongle_hub_port': hub_port,
         'power_cycle_available': bool(hub and hub['switchable']),
+        'power_cycle_collateral': (collateral_devices(hub['location'], hub_port, device_port)
+                                   if hub else []),
     }
 
 
@@ -655,8 +731,12 @@ def _format_probe(info):
     if info['uhubctl_error']:
         lines.append(f'power cycling: unavailable - {info["uhubctl_error"]}')
     elif info['power_cycle_available']:
+        collateral = info['power_cycle_collateral']
+        extra = (f' — also cuts {len(collateral)} other device(s): '
+                 + ', '.join(d['product'] or f"{d['vid']}:{d['pid']}" for d in collateral[:4])
+                 ) if collateral else ''
         lines.append(f'power cycling: available on hub {info["dongle_hub"]} '
-                     f'port {info["dongle_hub_port"]}')
+                     f'port {info["dongle_hub_port"]}{extra}')
     else:
         lines.append('power cycling: NOT available - no hub here can switch this port\'s power')
     for hub in info['hubs']:
