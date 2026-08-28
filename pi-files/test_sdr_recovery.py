@@ -27,7 +27,14 @@ Current status for hub 2 [1d6b:0003 Linux xhci-hcd xHCI Host Controller, USB 3.0
   Port 1: 02a0 power 5gbps Rx.Detect
 """
 
-UHUBCTL_NO_PPPS = """Current status for hub 1-1 [2109:3431 USB2.0 Hub, USB 2.10, 4 ports]
+# A build that DOES report capabilities, on a hub that cannot switch power.
+UHUBCTL_NO_PPPS = """Current status for hub 1-1 [2109:3431 USB2.0 Hub, USB 2.10, 4 ports, nops]
+  Port 1: 0503 power highspeed enable connect [0bda:2838 Realtek RTL2838UHIDIR SN: 00000001]
+"""
+
+# uhubctl 2.0.0 (what Raspbian Buster ships) prints no capability flags at all.
+# Silence here must not be read as "this hardware cannot cut power".
+UHUBCTL_OLD_NO_FLAGS = """Current status for hub 1 [1d6b:0002 Linux xhci-hcd xHCI Host Controller, USB 2.00, 1 ports]
   Port 1: 0503 power highspeed enable connect [0bda:2838 Realtek RTL2838UHIDIR SN: 00000001]
 """
 
@@ -84,6 +91,18 @@ def main():
         ok, detail = sdr_recovery.step_power('1-1.1')
     check('a hub that cannot switch power says so instead of pretending',
           not ok and 'ppps' in detail)
+
+    # An old uhubctl reports no capabilities at all. Listing a hub is uhubctl's
+    # own statement that it can control it, so that must not be misread as "no".
+    with Fake(subprocess=types.SimpleNamespace(
+            run=fake_run(UHUBCTL_OLD_NO_FLAGS),
+            PIPE=-1, STDOUT=-2, DEVNULL=-3,
+            TimeoutExpired=Exception, CalledProcessError=Exception)):
+        old_hubs, old_error = sdr_recovery.uhubctl_survey()
+    check('a uhubctl too old to report capabilities is not read as "cannot switch"',
+          old_error is None and old_hubs[0]['switchable'] is True)
+    check('...and it is recorded that the capability was never actually reported',
+          old_hubs[0]['capability_reported'] is False)
 
     # --- probe classification ---------------------------------------------
     # Telling "opened but heard nothing" apart from "could not open the dongle"

@@ -115,6 +115,34 @@ def find_sdr():
     return None
 
 
+def list_usb_devices():
+    """Every USB device in sysfs, as an lsusb-style inventory.
+
+    --probe prints this because the alternative is a dead end: when the dongle
+    is not recognized, "RTL-SDR: NOT on the USB bus" cannot distinguish a
+    dongle that is unplugged from one whose USB id simply isn't in
+    RTL_SDR_IDS. Seeing everything that IS on the bus settles it immediately.
+    """
+    devices = []
+    for device in sorted(glob.glob('/sys/bus/usb/devices/*')):
+        port = os.path.basename(device)
+        if ':' in port or not PORT_RE.match(port):
+            continue
+        vid = _read_sysfs(os.path.join(device, 'idVendor'))
+        pid = _read_sysfs(os.path.join(device, 'idProduct'))
+        if not vid:
+            continue
+        devices.append({
+            'port': port,
+            'vid': vid.lower(),
+            'pid': (pid or '').lower(),
+            'product': _read_sysfs(os.path.join(device, 'product')) or '',
+            'manufacturer': _read_sysfs(os.path.join(device, 'manufacturer')) or '',
+            'known_sdr': (vid.lower(), (pid or '').lower()) in RTL_SDR_IDS,
+        })
+    return devices
+
+
 def remember_port(port):
     """Persist the dongle's bus address so we can still power-cycle it later.
 
@@ -191,9 +219,12 @@ def probe(seconds=30, rtl433_path=None):
     if packets:
         return 'packets', f'decoded {packets} packet(s) in {seconds}s'
 
-    stderr = (result.stderr or '').lower()
+    # Both streams: which one rtl_433 puts "no device" on varies by version and
+    # by how it was built, and reading only stderr made a dongle that never
+    # opened look merely quiet - the opposite of the distinction we need.
+    output = ((result.stdout or '') + '\n' + (result.stderr or '')).lower()
     for marker in OPEN_FAILURE_MARKERS:
-        if marker in stderr:
+        if marker in output:
             return 'no_device', f'rtl_433 could not open the dongle ({marker})'
 
     return 'silent', f'dongle opened but decoded nothing in {seconds}s'
@@ -288,6 +319,15 @@ def step_authorize(port):
 HUB_LINE = re.compile(r'^Current status for hub ([\w.\-:]+)(?:\s|,|\[)(.*)$')
 PORT_LINE = re.compile(r'^\s*Port (\d+):.*?\[([0-9a-fA-F]{4}):([0-9a-fA-F]{4})')
 
+# Tokens uhubctl uses to describe a hub's power-switching capability. Their
+# presence tells us this build reports capabilities at all - Buster ships
+# uhubctl 2.0.0, which prints none, and reading that silence as "cannot switch
+# power" would condemn perfectly capable hardware on version alone.
+CAPABILITY_TOKENS = ('ppps', 'ganged', 'nops')
+# Both of these mean uhubctl can actually cut power. 'ganged' does it for every
+# port on the hub at once rather than one port.
+SWITCHABLE_TOKENS = ('ppps', 'ganged')
+
 
 def uhubctl_survey():
     """Ask uhubctl what it sees, and where our dongle sits.
@@ -310,11 +350,11 @@ def uhubctl_survey():
     for line in (result.stdout or '').splitlines():
         hub_match = HUB_LINE.match(line.strip())
         if hub_match:
+            lowered = line.lower()
             current = {
                 'location': hub_match.group(1),
-                # uhubctl prints the hub's capabilities in the same bracket;
-                # 'ppps' is the one that means "I can switch port power".
-                'switchable': 'ppps' in line.lower(),
+                'switchable': any(t in lowered for t in SWITCHABLE_TOKENS),
+                'capability_reported': any(t in lowered for t in CAPABILITY_TOKENS),
                 'ports': [],
             }
             hubs.append(current)
@@ -330,6 +370,16 @@ def uhubctl_survey():
 
     if not hubs:
         return [], 'uhubctl reported no hubs (run it as root)'
+
+    # uhubctl's default listing only includes hubs it believes it can control,
+    # so being listed at all is the real signal. Where the build reports
+    # capabilities we trust those; where it reports none (uhubctl 2.0.0 and
+    # older) we go with what the listing itself implies, rather than returning
+    # a flat "not supported" that is really just the version being old.
+    if not any(hub['capability_reported'] for hub in hubs):
+        for hub in hubs:
+            hub['switchable'] = True
+
     return hubs, None
 
 
@@ -519,8 +569,10 @@ def describe_environment():
         'device': device,
         'remembered_port': recall_port(),
         'rtl433': find_rtl433(),
+        'usb_devices': list_usb_devices(),
         'uhubctl_error': hub_error,
         'hubs': [{'location': h['location'], 'switchable': h['switchable'],
+                  'capability_reported': h.get('capability_reported', False),
                   'devices': len(h['ports'])} for h in hubs],
         'dongle_hub': hub['location'] if hub else None,
         'dongle_hub_port': hub_port,
@@ -584,6 +636,22 @@ def _format_probe(info):
                      + (f' (last seen at {info["remembered_port"]})' if info['remembered_port'] else ''))
     lines.append(f'rtl_433: {info["rtl433"] or "not found"}')
     lines.append(f'receiver: {info["receiver"]} - {info["receiver_detail"]}')
+
+    # The combination below is a contradiction worth naming rather than leaving
+    # the reader to spot: rtl_433 talked to something we could not find, which
+    # means the dongle's USB id is missing from RTL_SDR_IDS.
+    if not device and info['receiver'] in ('packets', 'silent'):
+        lines.append('  ! rtl_433 opened a device we could not identify — its USB id is '
+                     'probably missing from RTL_SDR_IDS (see the bus list below)')
+
+    lines.append('USB devices on the bus:')
+    for entry in info['usb_devices']:
+        name = entry['product'] or entry['manufacturer'] or '(unnamed)'
+        mark = '  <- known RTL-SDR' if entry['known_sdr'] else ''
+        lines.append(f'  {entry["port"]:<10} {entry["vid"]}:{entry["pid"]}  {name}{mark}')
+    if not info['usb_devices']:
+        lines.append('  (none)')
+
     if info['uhubctl_error']:
         lines.append(f'power cycling: unavailable - {info["uhubctl_error"]}')
     elif info['power_cycle_available']:
@@ -592,9 +660,10 @@ def _format_probe(info):
     else:
         lines.append('power cycling: NOT available - no hub here can switch this port\'s power')
     for hub in info['hubs']:
+        assumed = '' if hub.get('capability_reported') else ' (assumed; this uhubctl is too old to say)'
         lines.append(f'  hub {hub["location"]}: '
-                     f'{"switchable" if hub["switchable"] else "power always on"}, '
-                     f'{hub["devices"]} device(s)')
+                     f'{"switchable" if hub["switchable"] else "power always on"}'
+                     f'{assumed}, {hub["devices"]} device(s)')
     return '\n'.join(lines)
 
 
