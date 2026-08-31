@@ -27,6 +27,7 @@ import {
   UsbOff,
   // CloudSync
 } from '@mui/icons-material';
+import ExportButton from './ExportButton';
 import {
   updateSensorConfig,
   logSensorEvent,
@@ -35,6 +36,16 @@ import {
   requestSdrReset,
   fetchSdrResetStatus,
 } from '../services/api';
+
+const SENSOR_CONFIG_COLUMNS = [
+  { key: 'sensor_id', label: 'Sensor ID' },
+  { key: 'display_name', label: 'Display Name' },
+  { key: 'location', label: 'Location' },
+  { key: 'color', label: 'Color' },
+  { key: 'enabled', label: 'Enabled' },
+  { key: 'status', label: 'Status' },
+  { key: 'last_seen', label: 'Last Seen' },
+];
 
 const fmtTime = (unixSec) =>
   new Date(unixSec * 1000).toLocaleString('en-US', {
@@ -270,6 +281,16 @@ const Settings = ({ sensorConfig, onRefresh }) => {
   const restartStatus = describeRestart(restartCmd);
   const sdrStatus = describeSdrReset(sdrCmd);
   const sensorEntries = Object.entries(settings);
+  // Exports what's on screen, so it includes edits that haven't been saved yet.
+  const sensorConfigRows = sensorEntries.map(([sensorId, config]) => ({
+    sensor_id: sensorId,
+    display_name: config.displayName || sensorId,
+    location: config.location || '',
+    color: config.color || '',
+    enabled: config.enabled !== false,
+    status: config.status || '',
+    last_seen: config.lastSeen ? new Date(config.lastSeen * 1000).toISOString() : '',
+  }));
   const enabledSensors = sensorEntries.filter(([_, config]) => config.enabled !== false);
   const disabledSensors = sensorEntries.filter(([_, config]) => config.enabled === false);
 
@@ -317,17 +338,24 @@ const Settings = ({ sensorConfig, onRefresh }) => {
       {/* Sensor Settings */}
       <Card sx={{ boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)', mb: 2 }}>
         <CardContent>
-          <Typography
-            variant="h6"
-            sx={{
-              fontSize: '17px',
-              fontWeight: 600,
-              color: '#1c1c1e',
-              mb: 2
-            }}
-          >
-            Sensor Configuration
-          </Typography>
+          <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+            <Typography
+              variant="h6"
+              sx={{
+                fontSize: '17px',
+                fontWeight: 600,
+                color: '#1c1c1e'
+              }}
+            >
+              Sensor Configuration
+            </Typography>
+            <ExportButton
+              filename="house-weather-sensors"
+              columns={SENSOR_CONFIG_COLUMNS}
+              rows={sensorConfigRows}
+              disabled={sensorConfigRows.length === 0}
+            />
+          </Box>
 
           {sensorEntries.length === 0 ? (
             <Alert severity="info">

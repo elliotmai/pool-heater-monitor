@@ -1,6 +1,14 @@
 import React, { useState, useMemo } from 'react';
 import { Box, Card, CardContent, Typography, Avatar, TextField, ToggleButtonGroup, ToggleButton, InputAdornment } from '@mui/material';
 import { Info, Warning, Error as ErrorIcon, Inbox, Search as SearchIcon } from '@mui/icons-material';
+import ExportButton from './ExportButton';
+
+const LOG_COLUMNS = [
+  { key: 'timestamp', label: 'Timestamp' },
+  { key: 'unix_timestamp', label: 'Unix Timestamp' },
+  { key: 'level', label: 'Level' },
+  { key: 'message', label: 'Message' },
+];
 
 const getLogIcon = (level) => {
   switch (level.toUpperCase()) {
@@ -150,6 +158,15 @@ const Logs = ({ logs }) => {
     return filtered;
   }, [logs, searchQuery, levelFilter, timeFilter]);
 
+  // Export what the filters are actually showing, not the whole log buffer —
+  // the point of an export here is usually "send someone this failure".
+  const exportRows = useMemo(() => filteredLogs.map(log => ({
+    timestamp: log.timestamp,
+    unix_timestamp: log.unix_timestamp ?? '',
+    level: (log.level || '').toUpperCase(),
+    message: log.message,
+  })), [filteredLogs]);
+
   if (!logs || logs.length === 0) {
     return (
       <Box
@@ -260,19 +277,32 @@ const Logs = ({ logs }) => {
         </ToggleButtonGroup>
       </Box>
 
-      {/* Results Count */}
-      <Typography
-        variant="caption"
+      {/* Results Count + Export */}
+      <Box
         sx={{
-          display: 'block',
-          textAlign: 'center',
-          color: '#8e8e93',
-          fontSize: '11px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 1,
           mb: 1.5
         }}
       >
-        Showing {filteredLogs.length} of {logs.length} logs
-      </Typography>
+        <Typography
+          variant="caption"
+          sx={{
+            color: '#8e8e93',
+            fontSize: '11px'
+          }}
+        >
+          Showing {filteredLogs.length} of {logs.length} logs
+        </Typography>
+        <ExportButton
+          filename="house-weather-logs"
+          columns={LOG_COLUMNS}
+          rows={exportRows}
+          disabled={exportRows.length === 0}
+        />
+      </Box>
 
       {/* Logs List */}
       {filteredLogs.length > 0 ? (
