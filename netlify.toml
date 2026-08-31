@@ -1,0 +1,15 @@
+# Netlify build settings.
+
+[build.environment]
+  # Netlify's smart secret detection flags the Firebase config in
+  # src/config/firebase.js because the web API key starts with "AIza", the
+  # prefix of a Google API key. That key is not a credential: Firebase web keys
+  # identify the project to Google's APIs and every browser client has to carry
+  # one, which is why the databaseURL sits next to it in the bundle either way.
+  # Hiding it — in an env var, a VITE_ variable, anywhere — would only move it,
+  # since Vite inlines the value into the client bundle regardless. What guards
+  # the data is the Realtime Database rules, not the obscurity of this string.
+  #
+  # So omit this one value rather than switching smart detection off: anything
+  # else in the repo that starts looking like a key still fails the build.
+  SECRETS_SCAN_SMART_DETECTION_OMIT_VALUES = "AIzaSyAuxd7JdNTlZh30J9MoArlWEqFtUsIhqrw"
