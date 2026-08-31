@@ -6,6 +6,26 @@ import {
 } from '@mui/icons-material';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { fetchStatsBundle } from '../services/api';
+import ExportButton from './ExportButton';
+import { round1 } from '../services/exportData';
+
+const STATS_COLUMNS = [
+  { key: 'sensor', label: 'Sensor' },
+  { key: 'display_name', label: 'Display Name' },
+  { key: 'current_f', label: 'Current (°F)' },
+  { key: 'vs_outside_f', label: 'vs Outside (°F)' },
+  { key: 'min_24h', label: '24h Min (°F)' },
+  { key: 'avg_24h', label: '24h Avg (°F)' },
+  { key: 'max_24h', label: '24h Max (°F)' },
+  { key: 'min_7d', label: '7d Min (°F)' },
+  { key: 'avg_7d', label: '7d Avg (°F)' },
+  { key: 'max_7d', label: '7d Max (°F)' },
+  { key: 'min_30d', label: '30d Min (°F)' },
+  { key: 'avg_30d', label: '30d Avg (°F)' },
+  { key: 'max_30d', label: '30d Max (°F)' },
+  { key: 'reporting_rate_pct', label: 'Reporting Rate (%)' },
+  { key: 'last_reported', label: 'Last Reported' },
+];
 
 const fmtDate = (u) => u ? new Date(u * 1000).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) : '';
 const fmtDateTime = (u) => u ? new Date(u * 1000).toLocaleString('en-US', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
@@ -237,6 +257,43 @@ const Stats = ({ sensorConfig, latest }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bundle, sensorNames]);
 
+  // Export the numbers this page computed — one row per sensor for CSV, plus
+  // the all-time records and the event log in the JSON payload (neither fits a
+  // per-sensor table).
+  const exportRows = useMemo(() => {
+    const uptimeOf = Object.fromEntries(reliability.sensors.map(r => [r.name, r]));
+    const spread = (stat, suffix) => ({
+      [`min_${suffix}`]: stat ? round1(stat.min) : '',
+      [`avg_${suffix}`]: stat ? round1(stat.avg) : '',
+      [`max_${suffix}`]: stat ? round1(stat.max) : '',
+    });
+    return perSensor.map(({ name, s24, s7, s30 }) => {
+      const current = currentOf(name);
+      const rel = uptimeOf[name];
+      return {
+        sensor: name,
+        display_name: nameOf(name),
+        current_f: round1(current) ?? '',
+        vs_outside_f: (current != null && outdoorNow != null) ? round1(current - outdoorNow) : '',
+        ...spread(s24, '24h'),
+        ...spread(s7, '7d'),
+        ...spread(s30, '30d'),
+        reporting_rate_pct: rel ? Math.round(rel.uptime * 100) : '',
+        last_reported: rel?.lastTs ? new Date(rel.lastTs * 1000).toISOString() : '',
+      };
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [perSensor, reliability, outdoorNow, sensorConfig]);
+
+  const exportJson = () => ({
+    exported_at: new Date().toISOString(),
+    outdoor_now_f: round1(outdoorNow) ?? null,
+    pi_reliability: reliability.pi,
+    sensors: exportRows,
+    all_time_records: bundle?.records ?? null,
+    events: bundle?.events ?? [],
+  });
+
   const events = bundle?.events || [];
   const describe = (e) => {
     if (e.event === 'renamed' || e.event === 'moved') return `${e.from || '—'} → ${e.to || '—'}`;
@@ -250,6 +307,18 @@ const Stats = ({ sensorConfig, latest }) => {
 
   return (
     <Box sx={{ p: 2, maxWidth: '800px', mx: 'auto' }}>
+      {/* Export the whole summary */}
+      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mb: 0.5 }}>
+        <ExportButton
+          filename="house-weather-stats"
+          label="Export stats"
+          columns={STATS_COLUMNS}
+          rows={exportRows}
+          json={exportJson}
+          disabled={exportRows.length === 0}
+        />
+      </Box>
+
       {/* Highlights */}
       {fun && (
         <Card sx={{ mb: 1.5, boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)' }}>

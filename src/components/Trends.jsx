@@ -3,6 +3,8 @@ import { Box, Card, CardContent, Typography, ToggleButtonGroup, ToggleButton, Ch
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { ArrowBack, ArrowForward, Visibility, VisibilityOff } from '@mui/icons-material';
 import { getSensorConfig } from '../config/settingsUtils';
+import ExportButton from './ExportButton';
+import { round1 } from '../services/exportData';
 
 // Each selectable window maps to (a) which tier/range App should fetch and
 // (b) an optional fixed sub-window (in hours) that we page through client-side.
@@ -103,6 +105,36 @@ const Trends = ({ latest, historical, onRangeChange }) => {
     [shown]
   );
 
+  // Export mirrors the chart: the same rows, the same window and page, with
+  // sensors under their display names rather than their raw keys.
+  const exportColumns = useMemo(() => {
+    const columns = [
+      { key: 'timestamp', label: 'Timestamp' },
+      { key: 'unix_timestamp', label: 'Unix Timestamp' },
+      { key: 'time', label: 'Label' },
+    ];
+    Object.entries(aliveSensors).forEach(([sensorName, config]) => {
+      columns.push({ key: sensorName, label: `${config.displayName} (°F)` });
+    });
+    if (hasOutdoorData) {
+      columns.push(
+        { key: 'outdoor_temp', label: 'Outdoor Temp (°F)' },
+        { key: 'outdoor_humidity', label: 'Outdoor Humidity (%)' },
+        { key: 'weather_description', label: 'Conditions' },
+      );
+    }
+    return columns;
+  }, [aliveSensors, hasOutdoorData]);
+
+  const exportRows = useMemo(() => shown.map(row => {
+    const out = {};
+    exportColumns.forEach(({ key }) => {
+      const value = row[key];
+      out[key] = key === 'unix_timestamp' ? value : (round1(value) ?? '');
+    });
+    return out;
+  }), [shown, exportColumns]);
+
   const fmt = (unixSec) => new Date(unixSec * 1000).toLocaleString('en-US', {
     month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit', hour12: true,
   });
@@ -155,9 +187,17 @@ const Trends = ({ latest, historical, onRangeChange }) => {
           <Typography variant="caption" sx={{ fontSize: '11px', color: '#8e8e93' }}>{windowLabel}</Typography>
         )}
 
-        <Typography variant="caption" sx={{ fontSize: '10px', color: shown.length ? '#8e8e93' : '#ff3b30' }}>
-          {shown.length ? `${shown.length} reading${shown.length !== 1 ? 's' : ''}` : 'No data for this window'}
-        </Typography>
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+          <Typography variant="caption" sx={{ fontSize: '10px', color: shown.length ? '#8e8e93' : '#ff3b30' }}>
+            {shown.length ? `${shown.length} reading${shown.length !== 1 ? 's' : ''}` : 'No data for this window'}
+          </Typography>
+          <ExportButton
+            filename={`house-weather-trends-${windowKey}`}
+            columns={exportColumns}
+            rows={exportRows}
+            disabled={exportRows.length === 0}
+          />
+        </Box>
       </Box>
 
       {/* Line visibility toggles */}

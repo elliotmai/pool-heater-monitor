@@ -2,6 +2,16 @@ import React, { useState, useEffect } from 'react';
 import { Box, Card, CardContent, Grid, Typography, Chip, IconButton } from '@mui/material';
 import { DragIndicator } from '@mui/icons-material';
 import { getSensorConfig } from '../config/settingsUtils';
+import ExportButton from './ExportButton';
+import { round1 } from '../services/exportData';
+
+const SNAPSHOT_COLUMNS = [
+  { key: 'timestamp', label: 'Timestamp' },
+  { key: 'sensor', label: 'Sensor' },
+  { key: 'display_name', label: 'Display Name' },
+  { key: 'location', label: 'Location' },
+  { key: 'temperature_f', label: 'Temperature (°F)' },
+];
 
 const STORAGE_KEY = 'sensorCardOrder';
 
@@ -320,6 +330,24 @@ const Overview = ({ latest, weather }) => {
     })
     .filter(entry => entry !== null);
 
+  // The current snapshot, in the same order the cards are shown. CSV gets one
+  // row per sensor; JSON also carries the weather block, which has no place in
+  // a per-sensor table.
+  const snapshotRows = orderedSensors.map(([sensorName, config]) => ({
+    timestamp: latest?.timestamp ?? '',
+    sensor: sensorName,
+    display_name: config.displayName || sensorName,
+    location: config.location || '',
+    temperature_f: round1(latest?.[sensorName]) ?? '',
+  }));
+
+  const snapshotJson = () => ({
+    exported_at: new Date().toISOString(),
+    reading_at: latest?.timestamp ?? null,
+    sensors: snapshotRows,
+    weather: weatherData,
+  });
+
   return (
     <Box sx={{ p: 2, maxWidth: '800px', mx: 'auto' }}>
       {/* Temperature Sensors */}
@@ -340,19 +368,33 @@ const Overview = ({ latest, weather }) => {
             >
               Temperature Sensors
             </Typography>
-            <Typography
-              variant="caption"
+            <Box
               sx={{
-                fontSize: '11px',
-                color: '#8e8e93',
-                mb: 2,
-                display: 'block',
-                textAlign: 'center',
-                fontStyle: 'italic'
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 1,
+                mb: 2
               }}
             >
-              Drag cards to rearrange
-            </Typography>
+              <Typography
+                variant="caption"
+                sx={{
+                  fontSize: '11px',
+                  color: '#8e8e93',
+                  fontStyle: 'italic'
+                }}
+              >
+                Drag cards to rearrange
+              </Typography>
+              <ExportButton
+                filename="house-weather-snapshot"
+                columns={SNAPSHOT_COLUMNS}
+                rows={snapshotRows}
+                json={snapshotJson}
+                disabled={snapshotRows.length === 0}
+              />
+            </Box>
             <Box
               sx={{
                 display: 'flex',

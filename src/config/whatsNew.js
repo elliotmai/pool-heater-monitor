@@ -12,6 +12,13 @@
  */
 export const WHATS_NEW = [
   {
+    version: '2026.08.31',
+    date: 'August 2026',
+    items: [
+      '⬇️ You can now export your data. Every screen has an “Export” button that saves what you’re looking at as a CSV (for spreadsheets) or JSON (for scripts) — the readings behind the chart window you’re viewing, the stats summary, your filtered logs, the current snapshot, or your sensor list.',
+    ],
+  },
+  {
     version: '2026.08.26',
     date: 'August 2026',
     items: [
