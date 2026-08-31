@@ -99,6 +99,10 @@ def claim_command(name, claiming_status, newer_than=0):
     this command and `newer_than`. Stamping handled_at as we claim it is what
     makes a command fire exactly once: re-reading the same node next cycle
     finds nothing new, so nothing loops.
+
+    A request that only fails the `newer_than` test is stamped 'superseded'
+    rather than ignored, so the dashboard can tell "a restart beat you to it"
+    apart from "the monitor is gone" — they used to look identical.
     """
     try:
         ref = db.reference(f'/water-heater-user/commands/{name}')
@@ -106,12 +110,39 @@ def claim_command(name, claiming_status, newer_than=0):
         if not isinstance(cmd, dict):
             return None
         requested_at = cmd.get('requested_at') or 0
-        if requested_at <= max(cmd.get('handled_at') or 0, newer_than):
+        if requested_at <= (cmd.get('handled_at') or 0):
+            return None  # already acted on — this is what stops it looping
+        # Stamp at least as late as the request. The dashboard writes
+        # requested_at from the browser's clock, so a browser running ahead of
+        # the Pi would otherwise leave handled_at permanently behind it — and a
+        # command that never counts as handled is a command that fires every
+        # cycle. For a restart, that is a reboot loop until the clocks meet.
+        stamped_at = max(int(time.time()), requested_at)
+        if requested_at <= newer_than:
+            # The request predates this process, so whatever it asked for has
+            # already effectively happened: we restarted since it was written.
+            # Stamp it anyway. Left untouched it stays 'requested' forever —
+            # nothing ever expires these nodes — and the dashboard reads that
+            # as "the monitor never picked this up, so it isn't looping",
+            # which is the opposite of what took place.
+            ref.update({'status': 'superseded', 'handled_at': stamped_at})
+            print(f'[INFO] Dropping a {name} request from before this process started '
+                  '— a restart has already happened since; marked superseded.')
             return None
         # Acknowledge so the dashboard can reflect that it was picked up.
-        ref.update({'status': claiming_status, 'handled_at': int(time.time())})
+        ref.update({'status': claiming_status, 'handled_at': stamped_at})
         return cmd
     except Exception as e:
+        # This used to only print. A database that still accepts our readings
+        # but refuses command reads then looked exactly like a monitor that had
+        # stopped looping — same silence on the dashboard, no trace in Logs.
+        # Say it where the dashboard can show it. Throttled, and keyed on the
+        # exception type so a persistent failure doesn't fill the log node.
+        log_to_db_throttled(
+            'WARNING',
+            f'Could not read the {name} command from the database '
+            f'({type(e).__name__}) — remote {name} requests will not be picked up.',
+            throttle_secs=ERROR_LOG_THROTTLE)
         print(f"[WARNING] {name}-command check failed: {e}")
         return None
 

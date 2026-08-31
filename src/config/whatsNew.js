@@ -12,6 +12,14 @@
  */
 export const WHATS_NEW = [
   {
+    version: '2026.08.31.1',
+    date: 'August 2026',
+    items: [
+      '✅ The Device screen no longer cries wolf. “Restart Monitor” used to warn that the monitor had stopped looping whenever a request went unanswered — including when the monitor simply restarted on its own first, which is the normal case. It now tells those apart, and says which one you’re looking at.',
+      '🔎 When a command goes unanswered, the app now checks whether readings are still arriving before blaming the Pi — so it can point at the real problem: the Pi being off, or the monitor running but unable to read commands (which it now records in the logs instead of failing silently).',
+    ],
+  },
+  {
     version: '2026.08.31',
     date: 'August 2026',
     items: [

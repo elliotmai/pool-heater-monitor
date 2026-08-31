@@ -112,7 +112,7 @@ function App() {
       case 3:
         return <Logs logs={data.logs} />;
       case 4:
-        return <Settings sensorConfig={data.sensorConfig} onRefresh={refreshData} />;
+        return <Settings sensorConfig={data.sensorConfig} latest={data.latest} onRefresh={refreshData} />;
       default:
         return null;
     }
@@ -124,7 +124,7 @@ function App() {
   // sensor data). Surface that instead of showing silently stale numbers.
   const lastReadingSec = data.latest?.unix_timestamp || null;
   const minsAgo = lastReadingSec ? Math.round((Date.now() / 1000 - lastReadingSec) / 60) : null;
-  const piOffline = !loading && (!lastReadingSec || minsAgo > 16);
+  const piOffline = !loading && (!lastReadingSec || minsAgo > CONFIG.PI_SILENT_AFTER_MINS);
 
   // The heartbeat and the sensors are separate failures: the Pi can keep
   // writing rows (and weather) for weeks while not one sensor reports. That

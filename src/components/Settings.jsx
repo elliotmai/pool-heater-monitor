@@ -28,6 +28,7 @@ import {
   // CloudSync
 } from '@mui/icons-material';
 import ExportButton from './ExportButton';
+import { CONFIG } from '../config/config';
 import {
   updateSensorConfig,
   logSensorEvent,
@@ -52,27 +53,60 @@ const fmtTime = (unixSec) =>
     month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
   });
 
+/** Is the Pi still writing readings? `lastReadingSec` is its newest heartbeat. */
+const piIsWriting = (lastReadingSec) =>
+  !!lastReadingSec && (Date.now() / 1000 - lastReadingSec) / 60 <= CONFIG.PI_SILENT_AFTER_MINS;
+
 /**
- * Plain-language state of the last restart request. A request the Pi never
- * acknowledges means it isn't looping — which is itself the answer to "did my
- * restart do anything?".
+ * What an unacknowledged command means — which is not one thing.
+ *
+ * "Nobody picked this up" used to be reported as "the monitor isn't looping",
+ * but the heartbeat can say otherwise: if readings are still arriving, the loop
+ * IS running and it's the command read that's failing (the Pi logs that now).
+ * Those need different fixes, so don't state the one we haven't checked.
  */
-const describeRestart = (cmd) => {
+const neverPickedUp = (requested, waitedMins, lastReadingSec) => {
+  const mins = Math.round(waitedMins);
+  if (piIsWriting(lastReadingSec)) {
+    return {
+      text: `${requested} — never picked up (${mins} min ago), but readings are still arriving, so the monitor is running. It's the command read that's failing — check Logs.`,
+      severity: 'warning',
+    };
+  }
+  const silence = lastReadingSec
+    ? `no readings since ${fmtTime(lastReadingSec)}`
+    : 'no readings at all';
+  return {
+    text: `${requested} — never picked up (${mins} min ago), and ${silence}. The monitor isn't running: check the Pi's power and internet.`,
+    severity: 'warning',
+  };
+};
+
+/**
+ * Plain-language state of the last restart request.
+ *
+ * The awkward case is a request the monitor restarted out from under: it only
+ * honors requests newer than its own start, so anything older is dropped — and
+ * that used to leave the node reading 'requested' forever, which looked exactly
+ * like a monitor that had died. The Pi now marks those superseded.
+ */
+const describeRestart = (cmd, lastReadingSec) => {
   if (!cmd || !cmd.requested_at) return null;
   const requested = `Requested ${fmtTime(cmd.requested_at)}`;
   if (cmd.completed_at && cmd.completed_at >= cmd.requested_at) {
     return { text: `${requested} — monitor restarted ${fmtTime(cmd.completed_at)}.`, severity: 'success' };
   }
+  if (cmd.status === 'superseded' && cmd.handled_at >= cmd.requested_at) {
+    return {
+      text: `${requested} — the monitor had already restarted by ${fmtTime(cmd.handled_at)}, so this request was dropped. Nothing is pending.`,
+      severity: 'info',
+    };
+  }
   if (cmd.handled_at && cmd.handled_at >= cmd.requested_at) {
     return { text: `${requested} — picked up by the Pi ${fmtTime(cmd.handled_at)}, restarting.`, severity: 'info' };
   }
   const waitedMins = (Date.now() / 1000 - cmd.requested_at) / 60;
-  if (waitedMins > 12) {
-    return {
-      text: `${requested} — never picked up (${Math.round(waitedMins)} min ago). The monitor isn't reading commands, so it isn't looping.`,
-      severity: 'warning',
-    };
-  }
+  if (waitedMins > 12) return neverPickedUp(requested, waitedMins, lastReadingSec);
   return { text: `${requested} — waiting for the Pi to pick it up (checks once a cycle).`, severity: 'info' };
 };
 
@@ -81,7 +115,7 @@ const describeRestart = (cmd) => {
  * ladder worked, so this can say what actually fixed things rather than just
  * "done" — and, when nothing did, that the dongle really does need hands on it.
  */
-const describeSdrReset = (cmd) => {
+const describeSdrReset = (cmd, lastReadingSec) => {
   if (!cmd || !cmd.requested_at) return null;
   const requested = `Requested ${fmtTime(cmd.requested_at)}`;
   const done = cmd.completed_at && cmd.completed_at >= cmd.requested_at;
@@ -105,16 +139,11 @@ const describeSdrReset = (cmd) => {
     return { text: `${requested} — the Pi is working through the reset steps.`, severity: 'info' };
   }
   const waitedMins = (Date.now() / 1000 - cmd.requested_at) / 60;
-  if (waitedMins > 12) {
-    return {
-      text: `${requested} — never picked up (${Math.round(waitedMins)} min ago). The monitor isn't reading commands, so it isn't looping.`,
-      severity: 'warning',
-    };
-  }
+  if (waitedMins > 12) return neverPickedUp(requested, waitedMins, lastReadingSec);
   return { text: `${requested} — waiting for the Pi to pick it up (checks once a cycle).`, severity: 'info' };
 };
 
-const Settings = ({ sensorConfig, onRefresh }) => {
+const Settings = ({ sensorConfig, latest, onRefresh }) => {
   const [settings, setSettings] = useState({});
   const [snackbar, setSnackbar] = useState({ open: false, message: '', severity: 'success' });
   const [hasChanges, setHasChanges] = useState(false);
@@ -278,8 +307,11 @@ const Settings = ({ sensorConfig, onRefresh }) => {
     }
   };
 
-  const restartStatus = describeRestart(restartCmd);
-  const sdrStatus = describeSdrReset(sdrCmd);
+  // The heartbeat is what separates "the monitor is gone" from "the monitor is
+  // fine and the command read is failing", so both messages get to see it.
+  const lastReadingSec = latest?.unix_timestamp || null;
+  const restartStatus = describeRestart(restartCmd, lastReadingSec);
+  const sdrStatus = describeSdrReset(sdrCmd, lastReadingSec);
   const sensorEntries = Object.entries(settings);
   // Exports what's on screen, so it includes edits that haven't been saved yet.
   const sensorConfigRows = sensorEntries.map(([sensorId, config]) => ({
