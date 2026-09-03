@@ -6,6 +6,7 @@ import {
 } from '@mui/icons-material';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { fetchStatsBundle } from '../services/api';
+import { enabledSensorKeys, isSensorEnabled } from '../config/settingsUtils';
 import ExportButton from './ExportButton';
 import { round1 } from '../services/exportData';
 
@@ -129,13 +130,26 @@ const Stats = ({ sensorConfig, latest }) => {
   const nameOf = (id) => sensorConfig?.[id]?.displayName || id;
   const colorOf = (id) => sensorConfig?.[id]?.color || '#007aff';
 
-  // Every sensor seen in the last 30 days (keeps random RTL pickups visible).
+  // `sensorConfig` is a fresh object on every poll (~1 min), so the stats below
+  // key off *which* sensors are disabled rather than off the config's identity.
+  // Depending on the object directly would rebuild the charts — and replay
+  // their animations — once a minute for no change in what's shown.
+  const disabledKey = useMemo(
+    () => Object.keys(sensorConfig || {}).filter(id => !isSensorEnabled(id, sensorConfig)).sort().join(','),
+    [sensorConfig],
+  );
+
+  // Every enabled sensor seen in the last 30 days (keeps random RTL pickups
+  // visible, minus the ones switched off in Settings). Keys come from the
+  // readings rather than the config — the Pi records what it hears whether or
+  // not a sensor is enabled — so the disabled ones have to be filtered out
+  // here. Every figure on this page derives from this list.
   const sensorNames = useMemo(() => {
     if (!bundle) return [];
     const keys = new Set([...sensorKeysIn(bundle.raw7d), ...sensorKeysIn(bundle.hourly30d)]);
-    return [...keys].sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
+    return enabledSensorKeys(keys, sensorConfig).sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bundle]);
+  }, [bundle, disabledKey]);
 
   const nowSec = Math.floor(Date.now() / 1000);
 
@@ -294,7 +308,13 @@ const Stats = ({ sensorConfig, latest }) => {
     events: bundle?.events ?? [],
   });
 
-  const events = bundle?.events || [];
+  // The timeline is per-sensor, so a disabled sensor's renames and offline
+  // churn stay out of it as well.
+  const events = useMemo(
+    () => (bundle?.events || []).filter(e => isSensorEnabled(e.sensorId, sensorConfig)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [bundle, disabledKey],
+  );
   const describe = (e) => {
     if (e.event === 'renamed' || e.event === 'moved') return `${e.from || '—'} → ${e.to || '—'}`;
     if (e.event === 'offline') return e.note || '';
@@ -422,7 +442,12 @@ const Stats = ({ sensorConfig, latest }) => {
         <CardContent>
           <SectionTitle>All-Time Records</SectionTitle>
           {(() => {
-            const recs = bundle?.records?.sensors ? Object.entries(bundle.records.sensors) : [];
+            // Records are kept for every sensor ever rolled up, so a disabled
+            // one still has an entry — filter it out rather than clearing it,
+            // since re-enabling should bring its history back intact.
+            const recs = bundle?.records?.sensors
+              ? Object.entries(bundle.records.sensors).filter(([id]) => isSensorEnabled(id, sensorConfig))
+              : [];
             const outdoor = bundle?.records?.outside?.temp_f;
             if (recs.length === 0 && !outdoor) {
               return <Typography variant="body2" sx={{ textAlign: 'center', color: '#8e8e93', py: 2 }}>No records yet — they build from the daily rollups.</Typography>;

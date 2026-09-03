@@ -23,7 +23,7 @@ import Settings from './components/Settings';
 import LoadingScreen from './components/LoadingScreen';
 import WhatsNew from './components/WhatsNew';
 import { fetchInitialData, fetchBackgroundData, countReportingSensors } from './services/api';
-import { setSensorConfig } from './config/settingsUtils';
+import { setSensorConfig, getEnabledSensors } from './config/settingsUtils';
 import { CONFIG } from './config/config';
 import logo from './house-weather-logo-minimal.svg';
 import './App.css';
@@ -129,8 +129,11 @@ function App() {
   // The heartbeat and the sensors are separate failures: the Pi can keep
   // writing rows (and weather) for weeks while not one sensor reports. That
   // used to look completely healthy here, so call it out on its own.
-  const reportingSensors = countReportingSensors(data.latest);
-  const lastSensorSec = Object.values(data.sensorConfig || {})
+  // Both halves of this ignore disabled sensors: one that is switched off but
+  // still transmitting would otherwise keep the warning quiet, and its
+  // lastSeen would make the silence look shorter than it is.
+  const reportingSensors = countReportingSensors(data.latest, data.sensorConfig);
+  const lastSensorSec = Object.values(getEnabledSensors(data.sensorConfig))
     .reduce((newest, cfg) => Math.max(newest, cfg?.lastSeen || 0), 0) || null;
   const sensorsSilent = !loading && !piOffline && reportingSensors === 0;
   const sensorsSilentFor = lastSensorSec

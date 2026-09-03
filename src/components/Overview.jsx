@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Card, CardContent, Grid, Typography, Chip, IconButton } from '@mui/material';
 import { DragIndicator } from '@mui/icons-material';
-import { getSensorConfig } from '../config/settingsUtils';
+import { getSensorConfig, getEnabledSensors, isSensorEnabled } from '../config/settingsUtils';
 import ExportButton from './ExportButton';
 import { round1 } from '../services/exportData';
 
@@ -200,10 +200,9 @@ const Overview = ({ latest, weather }) => {
     description: (!rawWeather.description || rawWeather.description === 'None') ? null : rawWeather.description,
   } : null;
 
-  // Filter to only show alive sensors (enabled = alive from Firebase)
-  const aliveSensors = Object.entries(SENSOR_CONFIG).filter(
-    ([_, config]) => config.enabled !== false
-  );
+  // Only sensors enabled in Settings get a card — and the snapshot export
+  // below is built from the same list, so it matches what's on screen.
+  const aliveSensors = Object.entries(getEnabledSensors(SENSOR_CONFIG));
 
   // Load saved order from localStorage or use default order
   useEffect(() => {
@@ -322,11 +321,14 @@ const Overview = ({ latest, weather }) => {
     setDraggedIndex(null);
   };
 
-  // Get ordered sensor entries
+  // Get ordered sensor entries. The saved order is re-checked against the
+  // config here as well as in the effect above: a sensor disabled elsewhere
+  // arrives with the config refresh, one render before the effect prunes the
+  // order, and without this check its card would flash back for that frame.
   const orderedSensors = sensorOrder
     .map(name => {
       const config = SENSOR_CONFIG[name];
-      return config ? [name, config] : null;
+      return config && isSensorEnabled(name, SENSOR_CONFIG) ? [name, config] : null;
     })
     .filter(entry => entry !== null);
 

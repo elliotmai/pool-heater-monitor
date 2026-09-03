@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Box, Card, CardContent, Typography, ToggleButtonGroup, ToggleButton, Chip, IconButton } from '@mui/material';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { ArrowBack, ArrowForward, Visibility, VisibilityOff } from '@mui/icons-material';
-import { getSensorConfig } from '../config/settingsUtils';
+import { getSensorConfig, getEnabledSensors } from '../config/settingsUtils';
 import ExportButton from './ExportButton';
 import { round1 } from '../services/exportData';
 
@@ -39,10 +39,8 @@ const Trends = ({ latest, historical, onRangeChange }) => {
     onRangeChange(fetchKey);
   }, [fetchKey, onRangeChange]);
 
-  const SENSOR_CONFIG = getSensorConfig();
-  const aliveSensors = Object.fromEntries(
-    Object.entries(SENSOR_CONFIG).filter(([_, config]) => config.enabled !== false)
-  );
+  // Disabled sensors get no line, no toggle chip and no export column.
+  const aliveSensors = getEnabledSensors(getSensorConfig());
 
   const [visibleLines, setVisibleLines] = useState(() => {
     const initial = { outdoor_temp: true };
