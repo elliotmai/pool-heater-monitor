@@ -15,9 +15,10 @@ export const WHATS_NEW = [
     version: '2026.09.03',
     date: 'September 2026',
     items: [
-      '🚫 Sensors you switch off in Settings now disappear from the whole app, not just the Overview. The Stats page was still counting them in every figure it showed — highlights, room comparison, min/avg/max, all-time records, reliability and the sensor timeline — and they came along in exported files too. Turning a sensor off now really does mean “stop showing me this”, so a neighbour’s stray thermometer can no longer skew your hottest day or biggest swing.',
+      '🚫 Sensors you switch off in Settings no longer count toward anything you see. The Stats page was still mixing them into every figure it showed — hottest and coldest day, biggest swing, devices seen, room comparison, min/avg/max, all-time records, reliability and the sensor timeline. A neighbour’s stray thermometer can no longer skew your records.',
       '⚠️ The “no sensor has reported” warning is no longer silenced by a sensor you’ve disabled. A switched-off sensor that keeps transmitting used to count as “something is reporting” and hide a real outage of the sensors you actually watch — and it could make the “quiet for…” time look shorter than it was.',
-      '⚙️ Settings still lists every sensor, enabled or not, with its full history intact — switch one back on and all of its readings and records return.',
+      '⬇️ Your exports still include the disabled sensors, so nothing is lost — they now carry an “Enabled” column (and a marked column heading on the Trends export) so you can tell the two apart, or filter them out, in a spreadsheet.',
+      '⚙️ Settings still lists every sensor, enabled or not, and nothing is deleted — switch one back on and all of its readings, records and history return.',
     ],
   },
   {

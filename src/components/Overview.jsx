@@ -9,6 +9,7 @@ const SNAPSHOT_COLUMNS = [
   { key: 'timestamp', label: 'Timestamp' },
   { key: 'sensor', label: 'Sensor' },
   { key: 'display_name', label: 'Display Name' },
+  { key: 'enabled', label: 'Enabled' },
   { key: 'location', label: 'Location' },
   { key: 'temperature_f', label: 'Temperature (°F)' },
 ];
@@ -332,13 +333,19 @@ const Overview = ({ latest, weather }) => {
     })
     .filter(entry => entry !== null);
 
-  // The current snapshot, in the same order the cards are shown. CSV gets one
-  // row per sensor; JSON also carries the weather block, which has no place in
-  // a per-sensor table.
-  const snapshotRows = orderedSensors.map(([sensorName, config]) => ({
+  // The current snapshot: the cards in the order they're shown, then the
+  // disabled sensors after them. The export keeps the disabled sensors — their
+  // readings are still being recorded — and the `enabled` column is what stops
+  // them being averaged in with the rest. CSV gets one row per sensor; JSON
+  // also carries the weather block, which has no place in a per-sensor table.
+  const disabledSensors = Object.entries(SENSOR_CONFIG)
+    .filter(([name]) => !isSensorEnabled(name, SENSOR_CONFIG));
+
+  const snapshotRows = [...orderedSensors, ...disabledSensors].map(([sensorName, config]) => ({
     timestamp: latest?.timestamp ?? '',
     sensor: sensorName,
     display_name: config.displayName || sensorName,
+    enabled: isSensorEnabled(sensorName, SENSOR_CONFIG),
     location: config.location || '',
     temperature_f: round1(latest?.[sensorName]) ?? '',
   }));

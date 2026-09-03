@@ -13,6 +13,7 @@ import { round1 } from '../services/exportData';
 const STATS_COLUMNS = [
   { key: 'sensor', label: 'Sensor' },
   { key: 'display_name', label: 'Display Name' },
+  { key: 'enabled', label: 'Enabled' },
   { key: 'current_f', label: 'Current (°F)' },
   { key: 'vs_outside_f', label: 'vs Outside (°F)' },
   { key: 'min_24h', label: '24h Min (°F)' },
@@ -139,17 +140,24 @@ const Stats = ({ sensorConfig, latest }) => {
     [sensorConfig],
   );
 
-  // Every enabled sensor seen in the last 30 days (keeps random RTL pickups
-  // visible, minus the ones switched off in Settings). Keys come from the
-  // readings rather than the config — the Pi records what it hears whether or
-  // not a sensor is enabled — so the disabled ones have to be filtered out
-  // here. Every figure on this page derives from this list.
-  const sensorNames = useMemo(() => {
+  // Every sensor seen in the last 30 days, enabled or not (keeps random RTL
+  // pickups visible). Keys come from the readings rather than the config,
+  // because the Pi records what it hears whether or not a sensor is enabled.
+  const allSensorNames = useMemo(() => {
     if (!bundle) return [];
     const keys = new Set([...sensorKeysIn(bundle.raw7d), ...sensorKeysIn(bundle.hourly30d)]);
-    return enabledSensorKeys(keys, sensorConfig).sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
+    return [...keys].sort((a, b) => nameOf(a).localeCompare(nameOf(b)));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bundle, disabledKey]);
+  }, [bundle]);
+
+  // The enabled subset — every figure *shown* on this page derives from this,
+  // so a disabled sensor never lands in a shared total. The exports go the
+  // other way and use the full list, tagging each row with `enabled`.
+  const sensorNames = useMemo(
+    () => enabledSensorKeys(allSensorNames, sensorConfig),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [allSensorNames, disabledKey],
+  );
 
   const nowSec = Math.floor(Date.now() / 1000);
 
@@ -160,7 +168,7 @@ const Stats = ({ sensorConfig, latest }) => {
   //    isolates a flaky sensor from Pi downtime (all sensors missing = Pi's
   //    fault, which shows up in the Pi rating instead).
   const EXPECTED_INTERVAL = 300;
-  const reliability = useMemo(() => {
+  const reliabilityAll = useMemo(() => {
     if (!bundle) return { pi: null, sensors: [] };
     const rows = bundle.raw7d;
     const actualCycles = rows.length;
@@ -170,7 +178,7 @@ const Stats = ({ sensorConfig, latest }) => {
     const lastTs = rows.length ? rows[rows.length - 1].unix_timestamp : null;
     const pi = { uptime: Math.min(1, actualCycles / expectedCycles), actualCycles, expectedCycles, lastTs };
 
-    const sensors = sensorNames.map(name => {
+    const sensors = allSensorNames.map(name => {
       let present = 0, sLast = null;
       rows.forEach(r => { if (typeof r[name] === 'number') { present += 1; sLast = r.unix_timestamp; } });
       return { name, uptime: actualCycles ? present / actualCycles : 0, present, lastTs: sLast };
@@ -178,7 +186,18 @@ const Stats = ({ sensorConfig, latest }) => {
 
     return { pi, sensors };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bundle, sensorNames]);
+  }, [bundle, allSensorNames]);
+
+  // What the Reliability card shows: the Pi's own rating, plus the enabled
+  // sensors only. `reliabilityAll` keeps the disabled ones for the export.
+  const reliability = useMemo(
+    () => ({
+      pi: reliabilityAll.pi,
+      sensors: reliabilityAll.sensors.filter(r => isSensorEnabled(r.name, sensorConfig)),
+    }),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [reliabilityAll, disabledKey],
+  );
 
   // "Primary" = well-covered sensors (real rooms), used for charts/comparison so
   // one-off RTL pickups don't clutter them.
@@ -240,14 +259,21 @@ const Stats = ({ sensorConfig, latest }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bundle, primary]);
 
-  const perSensor = useMemo(() => {
+  const perSensorAll = useMemo(() => {
     if (!bundle) return [];
     const raw24 = bundle.raw7d.filter(r => r.unix_timestamp >= nowSec - 86400);
-    return sensorNames.map(name => ({
+    return allSensorNames.map(name => ({
       name, s24: periodStats(raw24, name), s7: periodStats(bundle.raw7d, name), s30: periodStats(bundle.hourly30d, name),
     }));
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bundle, sensorNames]);
+  }, [bundle, allSensorNames]);
+
+  // Shown in "Min · Avg · Max by Period"; the export uses perSensorAll instead.
+  const perSensor = useMemo(
+    () => perSensorAll.filter(p => isSensorEnabled(p.name, sensorConfig)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [perSensorAll, disabledKey],
+  );
 
   const fun = useMemo(() => {
     if (!bundle) return null;
@@ -274,19 +300,28 @@ const Stats = ({ sensorConfig, latest }) => {
   // Export the numbers this page computed — one row per sensor for CSV, plus
   // the all-time records and the event log in the JSON payload (neither fits a
   // per-sensor table).
-  const exportRows = useMemo(() => {
-    const uptimeOf = Object.fromEntries(reliability.sensors.map(r => [r.name, r]));
+  //
+  // Unlike everything above, the export covers EVERY sensor, disabled ones
+  // included, and carries an `enabled` column so the two never get averaged
+  // together by accident. Nothing you can see on screen is lost by switching a
+  // sensor off — it just stops being mixed into the shared figures.
+  //
+  // Built on click rather than on every render (ExportButton resolves a
+  // function), so the disabled sensors' stats cost nothing until you ask.
+  const buildExportRows = () => {
+    const uptimeOf = Object.fromEntries(reliabilityAll.sensors.map(r => [r.name, r]));
     const spread = (stat, suffix) => ({
       [`min_${suffix}`]: stat ? round1(stat.min) : '',
       [`avg_${suffix}`]: stat ? round1(stat.avg) : '',
       [`max_${suffix}`]: stat ? round1(stat.max) : '',
     });
-    return perSensor.map(({ name, s24, s7, s30 }) => {
+    return perSensorAll.map(({ name, s24, s7, s30 }) => {
       const current = currentOf(name);
       const rel = uptimeOf[name];
       return {
         sensor: name,
         display_name: nameOf(name),
+        enabled: isSensorEnabled(name, sensorConfig),
         current_f: round1(current) ?? '',
         vs_outside_f: (current != null && outdoorNow != null) ? round1(current - outdoorNow) : '',
         ...spread(s24, '24h'),
@@ -296,14 +331,16 @@ const Stats = ({ sensorConfig, latest }) => {
         last_reported: rel?.lastTs ? new Date(rel.lastTs * 1000).toISOString() : '',
       };
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [perSensor, reliability, outdoorNow, sensorConfig]);
+  };
 
+  // `all_time_records` and `events` are the raw nodes, so they already cover
+  // the disabled sensors; `sensors` carries the `enabled` flag to tell them
+  // apart.
   const exportJson = () => ({
     exported_at: new Date().toISOString(),
     outdoor_now_f: round1(outdoorNow) ?? null,
-    pi_reliability: reliability.pi,
-    sensors: exportRows,
+    pi_reliability: reliabilityAll.pi,
+    sensors: buildExportRows(),
     all_time_records: bundle?.records ?? null,
     events: bundle?.events ?? [],
   });
@@ -333,9 +370,9 @@ const Stats = ({ sensorConfig, latest }) => {
           filename="house-weather-stats"
           label="Export stats"
           columns={STATS_COLUMNS}
-          rows={exportRows}
+          rows={buildExportRows}
           json={exportJson}
-          disabled={exportRows.length === 0}
+          disabled={allSensorNames.length === 0}
         />
       </Box>
 
