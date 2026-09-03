@@ -2,7 +2,7 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { Box, Card, CardContent, Typography, ToggleButtonGroup, ToggleButton, Chip, IconButton } from '@mui/material';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { ArrowBack, ArrowForward, Visibility, VisibilityOff } from '@mui/icons-material';
-import { getSensorConfig } from '../config/settingsUtils';
+import { getSensorConfig, getEnabledSensors, isSensorEnabled } from '../config/settingsUtils';
 import ExportButton from './ExportButton';
 import { round1 } from '../services/exportData';
 
@@ -39,10 +39,10 @@ const Trends = ({ latest, historical, onRangeChange }) => {
     onRangeChange(fetchKey);
   }, [fetchKey, onRangeChange]);
 
+  // Disabled sensors get no line and no toggle chip. They do keep an export
+  // column — see exportColumns below.
   const SENSOR_CONFIG = getSensorConfig();
-  const aliveSensors = Object.fromEntries(
-    Object.entries(SENSOR_CONFIG).filter(([_, config]) => config.enabled !== false)
-  );
+  const aliveSensors = getEnabledSensors(SENSOR_CONFIG);
 
   const [visibleLines, setVisibleLines] = useState(() => {
     const initial = { outdoor_temp: true };
@@ -105,8 +105,14 @@ const Trends = ({ latest, historical, onRangeChange }) => {
     [shown]
   );
 
-  // Export mirrors the chart: the same rows, the same window and page, with
-  // sensors under their display names rather than their raw keys.
+  // Export mirrors the chart — the same rows, window and page — with sensors
+  // under their display names rather than their raw keys.
+  //
+  // Disabled sensors keep a column so their readings aren't lost, but it comes
+  // after the enabled ones and its header says "disabled". This table is one
+  // column per sensor rather than one row, so that header is where the flag
+  // has to live: select a range across the enabled columns and a disabled
+  // sensor can't quietly join the average.
   const exportColumns = useMemo(() => {
     const columns = [
       { key: 'timestamp', label: 'Timestamp' },
@@ -123,8 +129,14 @@ const Trends = ({ latest, historical, onRangeChange }) => {
         { key: 'weather_description', label: 'Conditions' },
       );
     }
+    Object.entries(SENSOR_CONFIG)
+      .filter(([sensorName]) => !isSensorEnabled(sensorName, SENSOR_CONFIG))
+      .forEach(([sensorName, config]) => {
+        columns.push({ key: sensorName, label: `${config.displayName} (°F, disabled)` });
+      });
     return columns;
-  }, [aliveSensors, hasOutdoorData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aliveSensors, hasOutdoorData, SENSOR_CONFIG]);
 
   const exportRows = useMemo(() => shown.map(row => {
     const out = {};

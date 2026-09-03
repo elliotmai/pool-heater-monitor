@@ -12,6 +12,16 @@
  */
 export const WHATS_NEW = [
   {
+    version: '2026.09.03',
+    date: 'September 2026',
+    items: [
+      '🚫 Sensors you switch off in Settings no longer count toward anything you see. The Stats page was still mixing them into every figure it showed — hottest and coldest day, biggest swing, devices seen, room comparison, min/avg/max, all-time records, reliability and the sensor timeline. A neighbour’s stray thermometer can no longer skew your records.',
+      '⚠️ The “no sensor has reported” warning is no longer silenced by a sensor you’ve disabled. A switched-off sensor that keeps transmitting used to count as “something is reporting” and hide a real outage of the sensors you actually watch — and it could make the “quiet for…” time look shorter than it was.',
+      '⬇️ Your exports still include the disabled sensors, so nothing is lost — they now carry an “Enabled” column (and a marked column heading on the Trends export) so you can tell the two apart, or filter them out, in a spreadsheet.',
+      '⚙️ Settings still lists every sensor, enabled or not, and nothing is deleted — switch one back on and all of its readings, records and history return.',
+    ],
+  },
+  {
     version: '2026.08.31.1',
     date: 'August 2026',
     items: [

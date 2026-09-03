@@ -9,6 +9,7 @@ import {
   startAt,
   limitToLast } from 'firebase/database';
 import { database } from '../config/firebase';
+import { isSensorEnabled } from '../config/settingsUtils';
 
 const BASE = 'water-heater-user';
 
@@ -493,9 +494,17 @@ export const fetchInitialData = async () => {
  * How many sensors reported a real value in this snapshot? A reading row is
  * still written every cycle as a heartbeat, so "the Pi is alive" and "sensors
  * are reporting" are different questions — this answers the second one.
+ *
+ * Only sensors that are enabled count. The Pi records everything it hears, so
+ * without this a sensor switched off in Settings would keep answering "yes,
+ * sensors are reporting" and hide a real outage of the ones you care about.
  */
-export const countReportingSensors = (latest) =>
-  latest ? Object.keys(latest).filter(key => isSensorKey(key, latest[key])).length : 0;
+export const countReportingSensors = (latest, sensorConfig) =>
+  latest
+    ? Object.keys(latest).filter(
+        key => isSensorKey(key, latest[key]) && isSensorEnabled(key, sensorConfig),
+      ).length
+    : 0;
 
 /**
  * Larger payloads for Trends and Logs. `range` selects which tier historical

@@ -29,19 +29,36 @@ export const getDiscoveredSensors = () => {
 };
 
 /**
- * Check if a sensor is enabled
+ * Is this a sensor the rest of the app should show?
+ *
+ * Disabled sensors are kept off every screen except Settings, which is where
+ * they get switched back on. The Pi knows nothing about this flag — it keeps
+ * recording whatever it hears — so this predicate is the only thing keeping a
+ * disabled sensor out of the charts, stats, records and exports.
+ *
+ * Pass `config` explicitly when you hold it as a prop; it defaults to the
+ * cached copy App fetched.
+ *
+ * A key with no config entry counts as enabled. The Pi writes a newly heard
+ * sensor's readings a cycle before its config row exists, so treating unknown
+ * keys as disabled would make new sensors invisible rather than merely unnamed.
  */
-export const isSensorEnabled = (sensorKey) => {
-  const config = cachedSensorConfig?.[sensorKey];
-  return config?.enabled !== false; // Default to true
-};
+export const isSensorEnabled = (sensorKey, config = cachedSensorConfig) =>
+  config?.[sensorKey]?.enabled !== false;
 
 /**
- * Get enabled sensors only
+ * Keep only the enabled entries of a `{ sensorKey: config }` map — the sensor
+ * list every screen but Settings should render.
  */
-export const getEnabledSensors = () => {
-  const config = cachedSensorConfig || {};
-  return Object.fromEntries(
-    Object.entries(config).filter(([_, sensorConfig]) => sensorConfig.enabled !== false)
+export const getEnabledSensors = (config = cachedSensorConfig) =>
+  Object.fromEntries(
+    Object.entries(config || {}).filter(([key]) => isSensorEnabled(key, config))
   );
-};
+
+/**
+ * Drop disabled sensors from a list of sensor keys. Stats discovers its keys
+ * from the readings themselves rather than from the config, so it needs to
+ * filter the keys instead of the config map.
+ */
+export const enabledSensorKeys = (keys, config = cachedSensorConfig) =>
+  [...keys].filter((key) => isSensorEnabled(key, config));
