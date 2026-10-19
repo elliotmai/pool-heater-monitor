@@ -29,3 +29,6 @@ pi-files/*firebase-adminsdk*.json
 # Python bytecode (pi-files)
 __pycache__/
 *.pyc
+
+# Home Assistant MQTT mirror config - holds a broker password. Lives only on the Pi.
+pi-files/ha_mqtt.json

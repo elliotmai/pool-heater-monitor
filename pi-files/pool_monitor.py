@@ -17,6 +17,15 @@ except Exception as e:
     sdr_recovery = None
     print(f'[WARNING] sdr_recovery.py not available ({e}); USB recovery is disabled')
 
+# Optional mirror of every cycle's readings into Home Assistant over MQTT. Same
+# deal as above: absent on an older deploy, and a no-op until ha_mqtt.json
+# exists on the Pi, so the monitor boots and behaves as before either way.
+try:
+    import ha_publisher
+except Exception as e:
+    ha_publisher = None
+    print(f'[WARNING] ha_publisher.py not available ({e}); Home Assistant mirror is disabled')
+
 # Initialize the DS18B20 sensors
 os.system('modprobe w1-gpio')
 os.system('modprobe w1-therm')
@@ -893,6 +902,14 @@ def main():
     last_data_unix = None     # When we last got a real reading (for diagnostics)
     process_start = int(time.time())  # For honoring remote restart requests
 
+    # Home Assistant mirror: None unless ha_mqtt.json exists on the Pi.
+    ha_mirror = None
+    if ha_publisher:
+        try:
+            ha_mirror = ha_publisher.from_config()
+        except Exception as e:
+            print(f'[WARNING] Home Assistant mirror setup failed ({e}); disabled')
+
     while True:
         cycle_start = time.time()
         cycle_errors = []  # Track errors for this cycle
@@ -986,7 +1003,7 @@ def main():
 
             # Step 4b: Publish diagnostics so a silent failure is visible in
             # the dashboard instead of only in journald on the Pi.
-            log_diagnostics_to_firebase({
+            diagnostics = {
                 'unix_timestamp': int(time.time()),
                 'timestamp': datetime.now().isoformat(),
                 'ds18b20_total': len(ds18b20_readings),
@@ -1000,7 +1017,14 @@ def main():
                 'consecutive_empty': consecutive_empty,
                 'last_data_unix': last_data_unix,
                 'diagnosis': 'ok' if got_data else diagnose_no_data(ds18b20_readings, rf_stats),
-            })
+            }
+            log_diagnostics_to_firebase(diagnostics)
+
+            # Step 4c: Mirror the same readings into Home Assistant. It is a
+            # second destination only - publish_cycle never raises, and a
+            # broker that is down or not built yet must not touch this loop.
+            if ha_mirror:
+                ha_mirror.publish_cycle(ds18b20_readings, rf_readings, weather_info, diagnostics)
            
             # Step 5: Log weather to Firebase (continue even if it fails)
             try:

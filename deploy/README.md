@@ -225,3 +225,46 @@ changes, `deploy.sh` prints a warning and the reinstall command; run it:
 sudo install -m 0755 -o root -g root \
   ~/pool-heater-monitor/pi-files/sdr_recovery.py /usr/local/sbin/sdr_recovery.py
 ```
+
+## Mirroring readings into Home Assistant (optional)
+
+`pi-files/ha_publisher.py` publishes each cycle's readings to an MQTT broker so
+Home Assistant can pick them up. It is an extra destination only: Firebase and
+the dashboard are untouched, and **nothing happens until you create a config
+file on the Pi**, so deploying it changes no behaviour.
+
+What Home Assistant gets: one entity per sensor (each DS18B20 and each 433MHz
+sensor by name, plus outside temperature and humidity), created automatically
+through MQTT discovery. Two diagnostic counters (`RF packets heard`, `Empty
+cycles in a row`) are published too, for "sensors went quiet" alerts later.
+Every entity expires to *unavailable* after 20 minutes without an update, so a
+dead sensor looks dead instead of showing its last value.
+
+Setup, once Home Assistant exists:
+
+1. In Home Assistant, install the **Mosquitto broker** add-on, create a user for
+   the Pi (Settings → People), and add the **MQTT** integration.
+2. On the Pi, create `/home/pi/Desktop/ha_mqtt.json` (it holds a password, so
+   `chmod 600` it; the deploy never touches it):
+
+   ```json
+   { "host": "192.168.1.50", "username": "pool", "password": "..." }
+   ```
+
+   Use the broker's IP address, not a hostname: name lookups can't be
+   time-limited and a slow one would stall the sensor loop. Optional keys:
+   `port`, `tls`, `discovery_prefix`, `base_topic`.
+3. Check it: `python3 /home/pi/Desktop/ha_publisher.py` publishes one test
+   sensor and says whether the broker accepted it.
+4. `sudo systemctl restart pool-monitor` (the config is read at startup). The
+   journal shows `Home Assistant mirror enabled` and then one `published N
+   sensor(s)` line per cycle.
+
+If the broker is down or not built yet, the monitor logs one warning an hour to
+the journal and carries on; nothing is written to the Firebase logs for it.
+
+Home Assistant only records from the moment it starts receiving, so history
+before that stays in Firebase. Backfilling it is a separate, later step.
+
+Offline tests (they start a throwaway local broker): `python3
+pi-files/test_ha_publisher.py`.
