@@ -254,8 +254,8 @@ Setup, once Home Assistant exists:
    Use the broker's IP address, not a hostname: name lookups can't be
    time-limited and a slow one would stall the sensor loop. Optional keys:
    `port`, `tls`, `discovery_prefix`, `base_topic`.
-3. Check it: `python3 /home/pi/Desktop/ha_publisher.py` publishes one test
-   sensor and says whether the broker accepted it.
+3. Check it: `python3 /home/pi/Desktop/ha_publisher.py` checks the broker accepts
+   the connection (it creates a throwaway test sensor and deletes it again at once).
 4. `sudo systemctl restart pool-monitor` (the config is read at startup). The
    journal shows `Home Assistant mirror enabled` and then one `published N
    sensor(s)` line per cycle.

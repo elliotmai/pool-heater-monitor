@@ -297,6 +297,8 @@ def main():
     first_elapsed = time.time() - started
     check('a new sensor pauses between its discovery and its first value (%.1fs)' % first_elapsed,
           first_elapsed >= 0.6)
+    check('a leftover test sensor is deleted too',
+          ('homeassistant/sensor/pool_monitor/test_sensor/config', '', True) in broker.published)
     check('removed outside-weather entities are deleted with empty retained messages',
           ('homeassistant/sensor/pool_monitor/outside_temperature/config', '', True) in broker.published
           and ('homeassistant/sensor/pool_monitor/outside_humidity/config', '', True) in broker.published)
@@ -319,6 +321,26 @@ def main():
     down.publish_cycle({'Green': 24.5}, {})
     check('a failed publish does not mark sensors as announced',
           down._announced == set() and down._cleaned is False)
+    ha.SETTLE_SECONDS = 2
+
+
+    # --- the hand-run self-test leaves nothing behind ---
+    broker = FakeBroker()
+    ok, why = ha.self_test(dict(cfg, port=broker.port))
+    configs = [(p, r) for t, p, r in broker.published if t == 'homeassistant/sensor/pool_monitor/test_sensor/config']
+    check('self-test succeeds', ok)
+    check('self-test announces the test sensor and then deletes it',
+          len(configs) == 2 and configs[0][0] != '' and configs[1] == ('', True))
+    broker.close()
+
+    # a real sensor that shares a retired slug is recreated, not left deleted
+    broker = FakeBroker()
+    mirror = ha.HomeAssistantMirror(dict(cfg, port=broker.port))
+    ha.SETTLE_SECONDS = 0
+    mirror.publish_cycle({'Test sensor': 20.0}, {})
+    final = [p for t, p, r in broker.published if t == 'homeassistant/sensor/pool_monitor/test_sensor/config'][-1]
+    check('a real sensor named like a retired one still ends up present', final != '')
+    broker.close()
     ha.SETTLE_SECONDS = 2
 
     print('\n' + ('All checks passed.' if not failures else '%d check(s) FAILED.' % failures))

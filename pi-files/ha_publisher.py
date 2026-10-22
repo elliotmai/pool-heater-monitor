@@ -41,7 +41,8 @@ POOL_HA_CONFIG env var). It lives only on the Pi because it holds a password:
       "base_topic": "pool_monitor"           // optional
     }
 
-Run `python3 ha_publisher.py` to publish one test message and see the result.
+Run `python3 ha_publisher.py` to check the broker accepts it; the throwaway
+test sensor it creates deletes itself straight away.
 """
 import json
 import os
@@ -68,7 +69,9 @@ SETTLE_SECONDS = 2
 # Entities an earlier version created that should no longer exist. Publishing an
 # empty retained message to a discovery topic is how Home Assistant is told to
 # delete the entity.
-REMOVED_SENSORS = ('outside_temperature', 'outside_humidity')
+REMOVED_SENSORS = ('outside_temperature', 'outside_humidity',
+                   # left behind by running this file's self-test by hand
+                   'test_sensor')
 
 CONNECT_TIMEOUT = 4  # seconds; bounds every socket operation below
 PUBLISH_DEADLINE = 15  # seconds; bounds a whole cycle's publish, however slowly a broker acks
@@ -201,10 +204,15 @@ def build_messages(cfg, ds18b20_readings, rf_readings, diagnostics=None):
     return discovery + states
 
 
-def removal_messages(cfg):
-    """Empty retained discovery messages that delete entities we no longer publish."""
+def removal_messages(cfg, slugs=REMOVED_SENSORS):
+    """Empty retained discovery messages that delete entities we no longer publish.
+
+    These go out ahead of the current discovery messages, so a real sensor that
+    happens to share a slug with a retired one is deleted and then recreated,
+    never left deleted.
+    """
     return [('%s/sensor/%s/%s/config' % (cfg['discovery_prefix'], cfg['base_topic'], slug), '', True)
-            for slug in REMOVED_SENSORS]
+            for slug in slugs]
 
 
 # --- A minimal MQTT 3.1.1 client (just CONNECT / PUBLISH / DISCONNECT) ----------
@@ -375,11 +383,21 @@ def from_config(path=None):
     return HomeAssistantMirror(cfg)
 
 
+def self_test(cfg):
+    """Prove the broker accepts us, without leaving an entity behind.
+
+    Announces a throwaway sensor, sends a value, then deletes it again, so
+    running this by hand does not clutter Home Assistant.
+    """
+    messages = build_messages(cfg, {'Test sensor': 21.5}, {})
+    messages += removal_messages(cfg, ('test_sensor',))
+    return publish(cfg, messages)
+
+
 if __name__ == '__main__':
     config = load_config(sys.argv[1] if len(sys.argv) > 1 else None)
     if config is None:
         sys.exit('No usable config. Create %s (see the top of this file).' % DEFAULT_CONFIG_PATH)
-    test = build_messages(config, {'Test sensor': 21.5}, {})
-    done, why = publish(config, test)
-    print('published %d messages' % len(test) if done else 'FAILED: ' + why)
+    done, why = self_test(config)
+    print('broker accepted the test sensor (and it was removed again)' if done else 'FAILED: ' + why)
     sys.exit(0 if done else 1)
