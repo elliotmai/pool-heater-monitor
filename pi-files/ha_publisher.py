@@ -13,6 +13,10 @@ as it did, and with one it publishes after every cycle:
     entities by itself (no YAML), and
   * the latest value of each sensor on its own topic.
 
+Only the pool sensors (and two diagnostic counters) are mirrored. The outside
+weather stays a Firebase/dashboard feature; Home Assistant has its own weather
+integrations if that is ever wanted there.
+
 Every sensor is published with `expire_after`, so one that stops reporting
 turns "unavailable" in Home Assistant instead of showing its last value
 forever - the same silent failure the Firebase side works to surface.
@@ -54,6 +58,17 @@ DEFAULT_CONFIG_PATH = '/home/pi/Desktop/ha_mqtt.json'
 # happens to transmit inside the scan window, so allow a few missed cycles
 # before calling it gone.
 EXPIRE_AFTER_SECONDS = 1200
+
+# Home Assistant only subscribes to a sensor's state topic after it has read that
+# sensor's discovery message. State is not retained, so a value sent in the same
+# instant is lost and the entity sits "unavailable" until the next cycle. When a
+# sensor is new, pause this long between its discovery and its first value.
+SETTLE_SECONDS = 2
+
+# Entities an earlier version created that should no longer exist. Publishing an
+# empty retained message to a discovery topic is how Home Assistant is told to
+# delete the entity.
+REMOVED_SENSORS = ('outside_temperature', 'outside_humidity')
 
 CONNECT_TIMEOUT = 4  # seconds; bounds every socket operation below
 PUBLISH_DEADLINE = 15  # seconds; bounds a whole cycle's publish, however slowly a broker acks
@@ -112,7 +127,7 @@ def _is_number(value):
     return isinstance(value, (int, float)) and not isinstance(value, bool)
 
 
-def _sensor_specs(ds18b20_readings, rf_readings, weather_info, diagnostics):
+def _sensor_specs(ds18b20_readings, rf_readings, diagnostics):
     """Everything worth publishing as (name, value, kind), numbers only.
 
     A failed wired read arrives as None and a missing wireless sensor is simply
@@ -127,12 +142,6 @@ def _sensor_specs(ds18b20_readings, rf_readings, weather_info, diagnostics):
         temp = reading.get('temperature_c') if isinstance(reading, dict) else None
         if _is_number(temp):
             specs.append((name, temp, 'temperature'))
-
-    weather = (weather_info or {}).get('weather') or {}
-    if _is_number(weather.get('temp_c')):
-        specs.append(('Outside temperature', weather['temp_c'], 'temperature'))
-    if _is_number(weather.get('humidity')):
-        specs.append(('Outside humidity', weather['humidity'], 'humidity'))
 
     diag = diagnostics or {}
     if _is_number(diag.get('rf_packets')):
@@ -155,27 +164,27 @@ def _discovery_payload(name, slug, kind, state_topic):
     if kind == 'temperature':
         payload['device_class'] = 'temperature'
         payload['unit_of_measurement'] = '°C'
-    elif kind == 'humidity':
-        payload['device_class'] = 'humidity'
-        payload['unit_of_measurement'] = '%'
     else:  # diagnostic counters: not a measurement of the pool, kept out of the main view
         payload['entity_category'] = 'diagnostic'
     return payload
 
 
-def build_messages(cfg, ds18b20_readings, rf_readings, weather_info=None, diagnostics=None):
+def build_messages(cfg, ds18b20_readings, rf_readings, diagnostics=None):
     """Return [(topic, payload_str, retain)] for one cycle.
 
-    Discovery configs are retained and re-sent every cycle: they are tiny, and
-    it means entities reappear after a Home Assistant or broker rebuild without
-    anyone remembering to republish. State is *not* retained, so a stale value
+    Every discovery message comes before every state message, so a caller can
+    leave a gap between the two (see SETTLE_SECONDS). Discovery configs are
+    retained and re-sent every cycle: they are tiny, and it means entities
+    reappear after a Home Assistant or broker rebuild without anyone
+    remembering to republish. State is *not* retained, so a stale value
     replayed to a freshly started Home Assistant can't masquerade as current.
     """
     base = cfg['base_topic']
     prefix = cfg['discovery_prefix']
-    messages = []
+    discovery = []
+    states = []
     used = {}
-    for name, value, kind in _sensor_specs(ds18b20_readings, rf_readings, weather_info, diagnostics):
+    for name, value, kind in _sensor_specs(ds18b20_readings, rf_readings, diagnostics):
         slug = slugify(name)
         # Two names that slug identically would silently overwrite each other.
         n = used.get(slug, 0)
@@ -184,12 +193,18 @@ def build_messages(cfg, ds18b20_readings, rf_readings, weather_info=None, diagno
             slug = '%s_%d' % (slug, n + 1)
         state_topic = '%s/%s' % (base, slug)
         discovery_topic = '%s/sensor/%s/%s/config' % (prefix, base, slug)
-        messages.append((discovery_topic,
-                         json.dumps(_discovery_payload(name, slug, kind, state_topic)),
-                         True))
+        discovery.append((discovery_topic,
+                          json.dumps(_discovery_payload(name, slug, kind, state_topic)),
+                          True))
         text = str(int(value)) if kind == 'diag_count' else repr(round(float(value), 2))
-        messages.append((state_topic, text, False))
-    return messages
+        states.append((state_topic, text, False))
+    return discovery + states
+
+
+def removal_messages(cfg):
+    """Empty retained discovery messages that delete entities we no longer publish."""
+    return [('%s/sensor/%s/%s/config' % (cfg['discovery_prefix'], cfg['base_topic'], slug), '', True)
+            for slug in REMOVED_SENSORS]
 
 
 # --- A minimal MQTT 3.1.1 client (just CONNECT / PUBLISH / DISCONNECT) ----------
@@ -249,8 +264,11 @@ def _recv_exact(sock, n):
     return buf
 
 
-def publish(cfg, messages, client_id='pool-heater-monitor'):
-    """Send messages over one short connection. Returns (ok, reason)."""
+def publish(cfg, messages, client_id='pool-heater-monitor', pause_after=None, pause_seconds=0):
+    """Send messages over one short connection. Returns (ok, reason).
+
+    pause_after: sleep pause_seconds once that many messages have been sent.
+    """
     sock = None
     try:
         sock = socket.create_connection((cfg['host'], cfg['port']), timeout=CONNECT_TIMEOUT)
@@ -274,6 +292,8 @@ def publish(cfg, messages, client_id='pool-heater-monitor'):
         for i, (topic, payload, retain) in enumerate(messages):
             if time.time() > deadline:
                 return False, 'broker too slow: gave up after %ds' % PUBLISH_DEADLINE
+            if pause_after is not None and i == pause_after:
+                time.sleep(pause_seconds)
             packet_id = i + 1
             sock.sendall(encode_publish(topic, payload, retain, packet_id=packet_id))
             ack = _recv_exact(sock, 4)
@@ -302,22 +322,36 @@ class HomeAssistantMirror(object):
         self.cfg = cfg
         self._failing = False
         self._last_failure_print = 0
+        self._announced = set()   # discovery topics Home Assistant has been sent
+        self._cleaned = False     # whether the removed entities have been deleted
 
-    def publish_cycle(self, ds18b20_readings, rf_readings, weather_info=None, diagnostics=None):
+    def publish_cycle(self, ds18b20_readings, rf_readings, diagnostics=None):
         try:
-            messages = build_messages(self.cfg, ds18b20_readings, rf_readings,
-                                      weather_info, diagnostics)
+            messages = build_messages(self.cfg, ds18b20_readings, rf_readings, diagnostics)
             if not messages:
                 return True
-            ok, reason = publish(self.cfg, messages)
+            discovery = [m for m in messages if m[2]]
+            states = [m for m in messages if not m[2]]
+            fresh = set(t for t, _, _ in discovery) - self._announced
+
+            outgoing = [] if self._cleaned else removal_messages(self.cfg)
+            outgoing += discovery
+            # Only pause when Home Assistant has something new to subscribe to;
+            # in steady state a cycle costs no extra time.
+            pause_after = len(outgoing) if fresh else None
+            outgoing += states
+            ok, reason = publish(self.cfg, outgoing, pause_after=pause_after,
+                                 pause_seconds=SETTLE_SECONDS)
         except Exception as e:  # a bug here must not take the sensor loop down
             ok, reason = False, 'unexpected %s: %s' % (type(e).__name__, e)
 
         if ok:
+            self._announced |= fresh
+            self._cleaned = True
             if self._failing:
                 print('[INFO] Home Assistant mirror: broker reachable again')
             self._failing = False
-            print('[INFO] Home Assistant mirror: published %d sensor(s)' % (len(messages) // 2))
+            print('[INFO] Home Assistant mirror: published %d sensor(s)' % len(states))
             return True
 
         # Console only, throttled. The Firebase logs are what the dashboard

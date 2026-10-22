@@ -1024,7 +1024,7 @@ def main():
             # second destination only - publish_cycle never raises, and a
             # broker that is down or not built yet must not touch this loop.
             if ha_mirror:
-                ha_mirror.publish_cycle(ds18b20_readings, rf_readings, weather_info, diagnostics)
+                ha_mirror.publish_cycle(ds18b20_readings, rf_readings, diagnostics)
            
             # Step 5: Log weather to Firebase (continue even if it fails)
             try:

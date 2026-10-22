@@ -234,8 +234,8 @@ the dashboard are untouched, and **nothing happens until you create a config
 file on the Pi**, so deploying it changes no behaviour.
 
 What Home Assistant gets: one entity per sensor (each DS18B20 and each 433MHz
-sensor by name, plus outside temperature and humidity), created automatically
-through MQTT discovery. Two diagnostic counters (`RF packets heard`, `Empty
+sensor by name), created automatically through MQTT discovery. The outside
+weather is not mirrored; it stays a dashboard feature. Two diagnostic counters (`RF packets heard`, `Empty
 cycles in a row`) are published too, for "sensors went quiet" alerts later.
 Every entity expires to *unavailable* after 20 minutes without an update, so a
 dead sensor looks dead instead of showing its last value.
@@ -259,6 +259,13 @@ Setup, once Home Assistant exists:
 4. `sudo systemctl restart pool-monitor` (the config is read at startup). The
    journal shows `Home Assistant mirror enabled` and then one `published N
    sensor(s)` line per cycle.
+
+A new sensor shows *unavailable* until its first value arrives, which is at the
+end of the cycle that announced it (a few minutes). If it is still unavailable
+after two cycles, open Settings → Devices & Services → MQTT → Configure, listen
+to `pool_monitor/#`, and see whether values arrive: if they do not, the Pi is
+not publishing (check `journalctl -u pool-monitor | grep -i "home assistant"`);
+if they do, the entity's configuration is the problem.
 
 If the broker is down or not built yet, the monitor logs one warning an hour to
 the journal and carries on; nothing is written to the Firebase logs for it.

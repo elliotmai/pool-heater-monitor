@@ -173,10 +173,9 @@ def main():
         check('config without a host disables the mirror', ha.load_config(nohost) is None)
 
     # --- what gets published ---
-    weather = {'weather': {'temp_c': 18.3, 'humidity': 61}}
     diag = {'rf_packets': 7, 'consecutive_empty': 0}
     msgs = ha.build_messages(cfg, {'Green': 24.5, 'Blue': None, 'Red': 30.0},
-                             {'OriaID12': {'temperature_c': 19.25}}, weather, diag)
+                             {'OriaID12': {'temperature_c': 19.25}}, diag)
     by_topic = {t: (p, r) for t, p, r in msgs}
 
     check('state topic carries the bare number', by_topic['pool_monitor/green'][0] == '24.5')
@@ -184,9 +183,8 @@ def main():
     check('a failed wired read (None) is not published at all',
           'pool_monitor/blue' not in by_topic
           and 'homeassistant/sensor/pool_monitor/blue/config' not in by_topic)
-    check('outside weather is published',
-          by_topic['pool_monitor/outside_temperature'][0] == '18.3'
-          and by_topic['pool_monitor/outside_humidity'][0] == '61.0')
+    check('outside weather is not mirrored',
+          not any('outside' in t for t in by_topic))
     check('diagnostic counters publish as whole numbers',
           by_topic['pool_monitor/rf_packets_heard'][0] == '7'
           and by_topic['pool_monitor/empty_cycles_in_a_row'][0] == '0')
@@ -200,9 +198,9 @@ def main():
           and disc['state_topic'] == 'pool_monitor/green' and disc['state_class'] == 'measurement')
     check('every sensor can expire to "unavailable"', disc['expire_after'] == ha.EXPIRE_AFTER_SECONDS)
     check('sensors share one device', disc['device']['identifiers'] == ['pool_heater_monitor'])
-    hum = json.loads(by_topic['homeassistant/sensor/pool_monitor/outside_humidity/config'][0])
-    check('humidity is typed as humidity in %',
-          hum['device_class'] == 'humidity' and hum['unit_of_measurement'] == '%')
+    first_state = min(i for i, m in enumerate(msgs) if not m[2])
+    last_discovery = max(i for i, m in enumerate(msgs) if m[2])
+    check('every discovery message precedes every state message', last_discovery < first_state)
     cnt = json.loads(by_topic['homeassistant/sensor/pool_monitor/rf_packets_heard/config'][0])
     check('diagnostics are filed under diagnostic, not as temperatures',
           cnt.get('entity_category') == 'diagnostic' and 'device_class' not in cnt)
@@ -212,7 +210,7 @@ def main():
           [(t, p, r) for t, p, r in ha.build_messages(cfg, {'Freezer': 0.0}, {})])
     check('True is not a temperature',
           ha.build_messages(cfg, {'Green': True}, {}) == [])
-    check('no readings -> nothing to send', ha.build_messages(cfg, {}, {}, None, None) == [])
+    check('no readings -> nothing to send', ha.build_messages(cfg, {}, {}, None) == [])
 
     clash = ha.build_messages(cfg, {'Hot Tub': 38.0, 'hot-tub': 37.0}, {})
     states = [t for t, p, r in clash if not t.startswith('homeassistant')]
@@ -280,7 +278,7 @@ def main():
     check('and keeps returning False without raising',
           mirror.publish_cycle({'Green': 24.5}, {}) is False)
     check('garbage input cannot raise out of publish_cycle',
-          mirror.publish_cycle(object(), 'nope', 12, []) is False)
+          mirror.publish_cycle(object(), 'nope', 12) is False)
 
     broker = FakeBroker()
     mirror = ha.HomeAssistantMirror(dict(cfg, port=broker.port))
@@ -288,6 +286,40 @@ def main():
           mirror.publish_cycle({'Green': 24.5}, {'OriaID1': {'temperature_c': 5.0}}) is True)
     check('an empty cycle is a quiet success', mirror.publish_cycle({}, {}) is True)
     broker.close()
+
+
+    # --- the "unavailable" race: a new sensor's value must not beat its discovery ---
+    ha.SETTLE_SECONDS = 0.6
+    broker = FakeBroker()
+    mirror = ha.HomeAssistantMirror(dict(cfg, port=broker.port))
+    started = time.time()
+    mirror.publish_cycle({'Green': 24.5}, {}, {'rf_packets': 3})
+    first_elapsed = time.time() - started
+    check('a new sensor pauses between its discovery and its first value (%.1fs)' % first_elapsed,
+          first_elapsed >= 0.6)
+    check('removed outside-weather entities are deleted with empty retained messages',
+          ('homeassistant/sensor/pool_monitor/outside_temperature/config', '', True) in broker.published
+          and ('homeassistant/sensor/pool_monitor/outside_humidity/config', '', True) in broker.published)
+    topics = [t for t, p, r in broker.published]
+    check('on the wire, discovery arrives before the value',
+          topics.index('homeassistant/sensor/pool_monitor/green/config') < topics.index('pool_monitor/green'))
+    count_before = len(broker.published)
+    started = time.time()
+    mirror.publish_cycle({'Green': 25.0}, {}, {'rf_packets': 3})
+    check('the same sensors next cycle cost no pause (%.2fs)' % (time.time() - started),
+          time.time() - started < 0.4)
+    check('and the deletion is not repeated every cycle',
+          sum(1 for t, p, r in broker.published[count_before:] if p == '' and r) == 0)
+    started = time.time()
+    mirror.publish_cycle({'Green': 25.0, 'Blue': 22.0}, {}, {'rf_packets': 3})
+    check('a sensor that appears later pauses again', time.time() - started >= 0.6)
+    broker.close()
+
+    down = ha.HomeAssistantMirror(dict(cfg, port=dead_port))
+    down.publish_cycle({'Green': 24.5}, {})
+    check('a failed publish does not mark sensors as announced',
+          down._announced == set() and down._cleaned is False)
+    ha.SETTLE_SECONDS = 2
 
     print('\n' + ('All checks passed.' if not failures else '%d check(s) FAILED.' % failures))
     return 1 if failures else 0
