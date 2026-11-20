@@ -218,3 +218,4 @@ exports.sensorHealth = onSchedule("*/15 * * * *", async () => {
     }
   }
 });
+exports.hiveSignIn = require("./hiveSignIn").hiveSignIn;

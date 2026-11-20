@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { HIVE_SIGN_IN_URL, ownerSignIn } from '../config/hiveSignIn';
 import {
   Box,
   Card,
@@ -328,6 +329,7 @@ const Settings = ({ sensorConfig, latest, onRefresh }) => {
 
   return (
     <Box sx={{ p: 2 }}>
+      <OwnerNotice />
       {/* Info Card
       <Card sx={{ boxShadow: '0 1px 3px rgba(0, 0, 0, 0.08)', mb: 2, bgcolor: '#f8f9fa' }}>
         <CardContent>
@@ -746,5 +748,18 @@ const Settings = ({ sensorConfig, latest, onRefresh }) => {
     </Box>
   );
 };
+
+/** Changing settings takes an owner signed in through Hive; say so when that isn't you. */
+function OwnerNotice() {
+  const [status, setStatus] = useState(null);
+  useEffect(() => { ownerSignIn().then(setStatus); }, []);
+  if (!status || status === 'owner') return null;
+  const text = {
+    'signed-out': <>To change settings, sign in to <a href={HIVE_SIGN_IN_URL}>Hive</a> first, then come back.</>,
+    'not-owner': 'Your Hive account can look but not change settings. Ask the pool’s owner to add you.',
+    unavailable: 'Changing settings isn’t available right now. Looking still works.',
+  }[status];
+  return <Alert severity="info" sx={{ mb: 2 }}>{text}</Alert>;
+}
 
 export default Settings;

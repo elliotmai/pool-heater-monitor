@@ -1,0 +1,10 @@
+{
+  "rules": {
+    ".read": false,
+    ".write": false,
+    "water-heater-user": {
+      ".read": true,
+      ".write": "auth != null && auth.token.pool_owner === true"
+    }
+  }
+}

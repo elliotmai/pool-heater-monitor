@@ -8,6 +8,8 @@
     "@emotion/styled": "^11.14.1",
     "@mui/icons-material": "^7.3.2",
     "@mui/material": "^7.3.2",
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.119.2",
     "firebase": "^12.7.0",
     "firebase-admin": "^14.1.0",
     "react": "^19.1.1",

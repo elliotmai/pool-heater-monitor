@@ -1,14 +1,21 @@
 import {
   ref,
   get,
-  set,
-  update,
-  push,
+  set as fbSet,
+  update as fbUpdate,
+  push as fbPush,
   query,
   orderByKey,
   startAt,
   limitToLast } from 'firebase/database';
 import { database } from '../config/firebase';
+import { ownerSignIn } from '../config/hiveSignIn';
+
+// Changing anything takes an owner, signed in through Hive (see
+// config/hiveSignIn.js and database.rules.json); reading doesn't.
+const set = async (...args) => { await ownerSignIn(); return fbSet(...args); };
+const update = async (...args) => { await ownerSignIn(); return fbUpdate(...args); };
+const push = async (...args) => { await ownerSignIn(); return fbPush(...args); };
 import { isSensorEnabled } from '../config/settingsUtils';
 
 const BASE = 'water-heater-user';
