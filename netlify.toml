@@ -13,3 +13,12 @@
   # So omit this one value rather than switching smart detection off: anything
   # else in the repo that starts looking like a key still fails the build.
   SECRETS_SCAN_SMART_DETECTION_OMIT_VALUES = "AIzaSyAuxd7JdNTlZh30J9MoArlWEqFtUsIhqrw,sb_publishable_fZo1FUg_j4O1EHH-W2Jr1A_4P8W3o2S"
+
+# The old address sends people to the new one, so the one Hive sign-in
+# (a cookie for *.flyingdoublemranch.com) covers this app too.
+[[redirects]]
+  from = "https://pool-heater-monitor.netlify.app/*"
+  to = "https://pool.flyingdoublemranch.com/:splat"
+  status = 301
+  force = true
+
