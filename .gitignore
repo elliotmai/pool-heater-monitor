@@ -32,3 +32,6 @@ __pycache__/
 
 # Home Assistant MQTT mirror config - holds a broker password. Lives only on the Pi.
 pi-files/ha_mqtt.json
+
+# Pi device key for Hive (lives only on the Pi)
+hive-device-key

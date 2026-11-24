@@ -1,24 +1,45 @@
-import {
-  ref,
-  get,
-  set as fbSet,
-  update as fbUpdate,
-  push as fbPush,
-  query,
-  orderByKey,
-  startAt,
-  limitToLast } from 'firebase/database';
-import { database } from '../config/firebase';
-import { ownerSignIn } from '../config/hiveSignIn';
-
-// Changing anything takes an owner, signed in through Hive (see
-// config/hiveSignIn.js and database.rules.json); reading doesn't.
-const set = async (...args) => { await ownerSignIn(); return fbSet(...args); };
-const update = async (...args) => { await ownerSignIn(); return fbUpdate(...args); };
-const push = async (...args) => { await ownerSignIn(); return fbPush(...args); };
+import { pool, poolHousehold } from '../config/hive';
 import { isSensorEnabled } from '../config/settingsUtils';
 
-const BASE = 'water-heater-user';
+// Everything lives in Hive's `pool` schema (see config/hive.js). Reading is
+// open; changing anything takes a member of the pool's household, which the
+// database's row-level security enforces.
+
+/** Throw on a Supabase error so each caller's catch handles it as before. */
+const ok = ({ data, error }) => {
+  if (error) throw error;
+  return data;
+};
+
+/** One single record from pool.state (live, diagnostics, commands/…), or null. */
+const getState = async (key) => {
+  const hid = await poolHousehold();
+  const row = ok(await pool.from('state').select('data').eq('household_id', hid).eq('key', key).maybeSingle());
+  return row ? row.data : null;
+};
+
+/** Replace one single record in pool.state (only commands are writable). */
+const setState = async (key, data) => {
+  const household_id = await poolHousehold();
+  ok(await pool.from('state').upsert({ household_id, key, data, updated_at: new Date().toISOString() }));
+};
+
+/** The API hands back at most 1000 rows per request; page through the rest. */
+const PAGE = 1000;
+const fetchAll = async (build) => {
+  const rows = [];
+  for (let from = 0; ; from += PAGE) {
+    const page = ok(await build().range(from, from + PAGE - 1));
+    rows.push(...page);
+    if (page.length < PAGE) return rows;
+  }
+};
+
+/** Merge settings into a sensor's record (creating it if new). */
+const saveSensor = async (sensorId, patch) => {
+  const hid = await poolHousehold();
+  ok(await pool.rpc('set_sensor', { hid, sensor: sensorId, patch }));
+};
 
 /**
  * Convert Celsius to Fahrenheit
@@ -44,33 +65,21 @@ export const RANGES = {
   '1y': { seconds: 365 * 86400, tier: 'daily' },
 };
 
-const TIER_PATH = {
-  raw: `${BASE}/readings_raw`,
-  hourly: `${BASE}/readings_hourly`,
-  daily: `${BASE}/readings_daily`,
-};
-
 const META_KEYS = new Set(['timestamp', 'unix_timestamp', 'bucket_start', 'bucket_end', 'count']);
 
 // ─────────────────────────── Sensor config ───────────────────────────
 
 /**
- * Fetch sensor configuration from Firebase
+ * Fetch sensor configuration
  * This is the source of truth for sensor metadata
  */
 export const fetchSensorConfig = async () => {
   try {
-    const sensorsRef = ref(database, `${BASE}/sensors`);
-    const snapshot = await get(sensorsRef);
-
-    if (!snapshot.exists()) {
-      return {};
-    }
-
-    const sensorsData = snapshot.val();
+    const hid = await poolHousehold();
+    const rows = ok(await pool.from('sensors').select('id, data').eq('household_id', hid));
 
     const sensorConfig = {};
-    Object.entries(sensorsData).forEach(([sensorId, config]) => {
+    rows.forEach(({ id: sensorId, data: config }) => {
       sensorConfig[sensorId] = {
         displayName: config.displayName || sensorId,
         color: config.color || '#007aff',
@@ -89,12 +98,10 @@ export const fetchSensorConfig = async () => {
 };
 
 /**
- * Update a sensor's configuration in Firebase
+ * Update a sensor's configuration
  */
 export const updateSensorConfig = async (sensorId, config) => {
   try {
-    const sensorRef = ref(database, `${BASE}/sensors/${sensorId}`);
-
     // Map app's 'enabled' to DB's 'alive'. Only include fields that were passed.
     const dbConfig = {};
     if (config.displayName !== undefined) dbConfig.displayName = config.displayName;
@@ -102,7 +109,7 @@ export const updateSensorConfig = async (sensorId, config) => {
     if (config.enabled !== undefined) dbConfig.alive = config.enabled !== false;
     if (config.location !== undefined) dbConfig.location = config.location;
 
-    await update(sensorRef, dbConfig);
+    await saveSensor(sensorId, dbConfig);
     return true;
   } catch (error) {
     console.error('Error updating sensor config:', error);
@@ -111,12 +118,10 @@ export const updateSensorConfig = async (sensorId, config) => {
 };
 
 /**
- * Create a new sensor configuration in Firebase
+ * Create a new sensor configuration
  */
 export const createSensorConfig = async (sensorId, config) => {
   try {
-    const sensorRef = ref(database, `${BASE}/sensors/${sensorId}`);
-
     const dbConfig = {
       displayName: config.displayName || sensorId,
       color: config.color || '#007aff',
@@ -124,7 +129,7 @@ export const createSensorConfig = async (sensorId, config) => {
       location: config.location || null,
     };
 
-    await set(sensorRef, dbConfig);
+    await saveSensor(sensorId, dbConfig);
     return true;
   } catch (error) {
     console.error('Error creating sensor config:', error);
@@ -142,10 +147,10 @@ const isSensorKey = (key, value) =>
  * Discover sensors from a reading and ensure they exist in sensor config.
  * Auto-creates config entries for any new sensor names found.
  */
-const discoverAndEnsureSensors = async (firebaseData, currentSensorConfig) => {
-  if (!firebaseData) return currentSensorConfig;
+const discoverAndEnsureSensors = async (latest, currentSensorConfig) => {
+  if (!latest) return currentSensorConfig;
 
-  const sensorKeys = Object.keys(firebaseData).filter(key => isSensorKey(key, firebaseData[key]));
+  const sensorKeys = Object.keys(latest).filter(key => isSensorKey(key, latest[key]));
 
   const DEFAULT_COLORS = [
     '#007aff', '#ff3b30', '#ffcc00', '#34c759', '#8e44ad',
@@ -181,21 +186,17 @@ const discoverAndEnsureSensors = async (firebaseData, currentSensorConfig) => {
  */
 export const fetchLatestData = async () => {
   try {
-    const liveRef = ref(database, `${BASE}/live`);
-    const weatherQuery = query(ref(database, `${BASE}/weather_history`), orderByKey(), limitToLast(1));
-
-    const [liveSnap, weatherSnap] = await Promise.all([get(liveRef), get(weatherQuery)]);
+    const hid = await poolHousehold();
+    const [live, weatherRows] = await Promise.all([
+      getState('live'),
+      pool.from('weather').select('data').eq('household_id', hid).order('ts', { ascending: false }).limit(1).then(ok),
+    ]);
 
     // No snapshot yet — return null so the UI shows placeholders, not a crash.
-    const live = liveSnap.exists() ? liveSnap.val() : null;
     if (!live) return null;
 
     // Latest rich weather (for the Overview weather card).
-    let latestWeather = null;
-    if (weatherSnap.exists()) {
-      const vals = Object.values(weatherSnap.val());
-      latestWeather = vals[vals.length - 1] || null;
-    }
+    const latestWeather = weatherRows[0]?.data || null;
 
     // Sensor values are stored in °C — convert to °F for display.
     const converted = {
@@ -274,17 +275,12 @@ export const fetchHistoricalData = async (range = '24h') => {
     const cfg = RANGES[range] || RANGES['24h'];
     const cutoffSec = Math.floor(Date.now() / 1000) - cfg.seconds;
 
-    const tierQuery = query(
-      ref(database, TIER_PATH[cfg.tier]),
-      orderByKey(),
-      startAt(String(cutoffSec)),
-    );
-    const snapshot = await get(tierQuery);
-    if (!snapshot.exists()) return [];
-    const val = snapshot.val();
+    const hid = await poolHousehold();
+    const rows = await fetchAll(() => pool.from('readings').select('data')
+      .eq('household_id', hid).eq('tier', cfg.tier).gte('ts', cutoffSec).order('ts'));
 
     const normalize = cfg.tier === 'raw' ? normalizeRaw : normalizeBucket;
-    return Object.values(val)
+    return rows.map(r => r.data)
       .filter(r => r && r.unix_timestamp)
       .sort((a, b) => (a.unix_timestamp || 0) - (b.unix_timestamp || 0))
       .map(r => normalize(r, range));
@@ -302,11 +298,12 @@ export const fetchHistoricalData = async (range = '24h') => {
  */
 export const fetchLogs = async () => {
   try {
-    const mk = (node) => query(ref(database, `${BASE}/${node}`), orderByKey(), limitToLast(1000));
-    const [infoSnap, errSnap] = await Promise.all([get(mk('logs')), get(mk('logs_errors'))]);
+    const hid = await poolHousehold();
+    const mk = (kind) => pool.from('logs').select('data').eq('household_id', hid).eq('kind', kind)
+      .order('ts', { ascending: false }).limit(1000).then(ok);
+    const [info, errors] = await Promise.all([mk('info'), mk('error')]);
 
-    const collect = (snap) => (snap.exists() ? Object.values(snap.val()) : []);
-    const all = [...collect(infoSnap), ...collect(errSnap)];
+    const all = [...info, ...errors].map(r => r.data);
 
     return all
       .filter(log => log && log.timestamp)
@@ -323,11 +320,11 @@ export const fetchLogs = async () => {
  */
 export const fetchSensorEvents = async (sensorId = null) => {
   try {
-    const eventsQuery = query(ref(database, `${BASE}/sensor_events`), orderByKey(), limitToLast(500));
-    const snapshot = await get(eventsQuery);
-    if (!snapshot.exists()) return [];
+    const hid = await poolHousehold();
+    const rows = ok(await pool.from('sensor_events').select('data').eq('household_id', hid)
+      .order('ts', { ascending: false }).limit(500));
 
-    let events = Object.values(snapshot.val()).filter(e => e && e.unix_timestamp);
+    let events = rows.map(r => r.data).filter(e => e && e.unix_timestamp);
     if (sensorId) events = events.filter(e => e.sensorId === sensorId);
     return events.sort((a, b) => (b.unix_timestamp || 0) - (a.unix_timestamp || 0));
   } catch (error) {
@@ -342,15 +339,20 @@ export const fetchSensorEvents = async (sensorId = null) => {
 export const logSensorEvent = async (sensorId, event, extra = {}) => {
   try {
     const now = Math.floor(Date.now() / 1000);
-    // push() gives a unique chronological key, so several changes saved in the
-    // same second don't overwrite each other.
-    await push(ref(database, `${BASE}/sensor_events`), {
-      sensorId,
-      event,
-      timestamp: new Date(now * 1000).toISOString(),
-      unix_timestamp: now,
-      ...extra,
-    });
+    // Each event gets its own row id, so several changes saved in the same
+    // second don't overwrite each other.
+    const household_id = await poolHousehold();
+    ok(await pool.from('sensor_events').insert({
+      household_id,
+      ts: now,
+      data: {
+        sensorId,
+        event,
+        timestamp: new Date(now * 1000).toISOString(),
+        unix_timestamp: now,
+        ...extra,
+      },
+    }));
     return true;
   } catch (error) {
     console.error('Error logging sensor event:', error);
@@ -383,7 +385,7 @@ export const fetchStatsBundle = async () => {
 export const requestPiRestart = async () => {
   try {
     const now = Math.floor(Date.now() / 1000);
-    await set(ref(database, `${BASE}/commands/restart`), {
+    await setState('commands/restart', {
       requested_at: now,
       requested_by: 'dashboard',
       status: 'requested',
@@ -404,8 +406,7 @@ export const requestPiRestart = async () => {
  */
 export const fetchRestartStatus = async () => {
   try {
-    const snapshot = await get(ref(database, `${BASE}/commands/restart`));
-    return snapshot.exists() ? snapshot.val() : null;
+    return await getState('commands/restart');
   } catch (error) {
     console.error('Restart status fetch error:', error);
     return null;
@@ -425,7 +426,7 @@ export const fetchRestartStatus = async () => {
 export const requestSdrReset = async () => {
   try {
     const now = Math.floor(Date.now() / 1000);
-    await set(ref(database, `${BASE}/commands/reset_sdr`), {
+    await setState('commands/reset_sdr', {
       requested_at: now,
       requested_by: 'dashboard',
       status: 'requested',
@@ -446,8 +447,7 @@ export const requestSdrReset = async () => {
  */
 export const fetchSdrResetStatus = async () => {
   try {
-    const snapshot = await get(ref(database, `${BASE}/commands/reset_sdr`));
-    return snapshot.exists() ? snapshot.val() : null;
+    return await getState('commands/reset_sdr');
   } catch (error) {
     console.error('SDR reset status fetch error:', error);
     return null;
@@ -461,8 +461,7 @@ export const fetchSdrResetStatus = async () => {
  */
 export const fetchDiagnostics = async () => {
   try {
-    const snapshot = await get(ref(database, `${BASE}/diagnostics`));
-    return snapshot.exists() ? snapshot.val() : null;
+    return await getState('diagnostics');
   } catch (error) {
     console.error('Diagnostics fetch error:', error);
     return null;
@@ -474,8 +473,7 @@ export const fetchDiagnostics = async () => {
  */
 export const fetchRecords = async () => {
   try {
-    const snapshot = await get(ref(database, `${BASE}/stats/records`));
-    return snapshot.exists() ? snapshot.val() : null;
+    return await getState('stats/records');
   } catch (error) {
     console.error('Records fetch error:', error);
     return null;

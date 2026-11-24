@@ -6,8 +6,7 @@ import json
 import requests
 import subprocess
 from datetime import datetime
-import firebase_admin
-from firebase_admin import credentials, db
+import hive_db
 
 # USB-level recovery for a wedged SDR. Optional on purpose: a Pi running an
 # older deploy simply won't have the file yet, and the monitor must still boot.
@@ -30,11 +29,9 @@ except Exception as e:
 os.system('modprobe w1-gpio')
 os.system('modprobe w1-therm')
 
-# Initialize Firebase Admin SDK with your service account
-cred = credentials.Certificate('/home/pi/Desktop/water-heater-sensors-firebase-adminsdk-fbsvc-0a078f1c90.json')
-firebase_admin.initialize_app(cred, {
-    'databaseURL': 'https://water-heater-sensors-default-rtdb.firebaseio.com'
-})
+# Where readings go: Hive once this Pi has its device key, Firebase until then
+# (see hive_db.py). Either way `db.reference(path)` works the same below.
+db = hive_db.connect()
 
 def log_to_db(level, message):
     """Log messages to Firebase database.
@@ -861,7 +858,7 @@ def main():
     print("="*60)
     print(f"Cycle target: {CYCLE_TARGET} seconds ({CYCLE_TARGET/60:.0f} minutes)")
     print(f"RF scan duration: {RTL_SCAN_DURATION} seconds per cycle")
-    print(f"Firebase project: water-heater-sensors")
+    print(f"Database: {getattr(db, 'name', 'Firebase (water-heater-sensors)')}")
     print(f"Weather source: weather.gov")
     print(f"Location: Automatically detected via IP")
     print("="*60 + "\n")

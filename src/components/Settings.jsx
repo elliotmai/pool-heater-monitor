@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { HIVE_SIGN_IN_URL, ownerSignIn } from '../config/hiveSignIn';
+import { HIVE_SIGN_IN_URL, ownerSignIn } from '../config/hive';
 import {
   Box,
   Card,
@@ -756,7 +756,7 @@ function OwnerNotice() {
   if (!status || status === 'owner') return null;
   const text = {
     'signed-out': <>To change settings, sign in to <a href={HIVE_SIGN_IN_URL}>Hive</a> first, then come back.</>,
-    'not-owner': 'Your Hive account can look but not change settings. Ask the pool’s owner to add you.',
+    'not-owner': 'Your Hive account can look but not change settings. Ask the pool’s household to add you.',
     unavailable: 'Changing settings isn’t available right now. Looking still works.',
   }[status];
   return <Alert severity="info" sx={{ mb: 2 }}>{text}</Alert>;

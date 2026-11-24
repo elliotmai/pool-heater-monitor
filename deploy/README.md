@@ -9,8 +9,8 @@ self-hosted runner — the runner bundles Node 20, which needs a newer
 fetches, and if any `pi-files/` changed, `rsync`s them into `~/Desktop/` and
 restarts `pool-monitor.service`.
 
-The Firebase service-account key is never synced or committed — it lives only
-on the Pi (`~/Desktop/water-heater-...-adminsdk-...json`).
+Neither the Hive device key (`~/Desktop/hive-device-key`) nor the old Firebase
+service-account key is ever synced or committed — they live only on the Pi.
 
 ## Files here
 
@@ -22,6 +22,42 @@ on the Pi (`~/Desktop/water-heater-...-adminsdk-...json`).
 | `pi-deploy.timer` | `/etc/systemd/system/` | triggers the deploy every minute |
 | `pool-deploy.sudoers` | `/etc/sudoers.d/pool-deploy` | lets `pi` restart the monitor and run USB recovery without a password |
 | `../pi-files/sdr_recovery.py` | `/usr/local/sbin/sdr_recovery.py` | resets/power-cycles a wedged RTL-SDR (root-owned; installed by hand) |
+
+## Where the data goes: Hive (Supabase)
+
+The dashboard's data moved from Firebase into Hive's Supabase project
+(schema `pool`). The Pi writes there through `pi-files/hive_db.py` with its own
+**device key**, which can only write readings, logs, weather, diagnostics and
+sensor last-seen times, and read/answer dashboard commands. The key lives only
+on the Pi, in `~/Desktop/hive-device-key` (mode 600), like the Firebase key did.
+
+The switch is automatic: the first time the monitor starts with `hive_db.py`
+and no key file, it fetches the key Hive left for it in Firebase
+(`/hive_bridge/pi_key`, readable only with the Pi's admin credentials), saves
+it, and from then on writes to Hive. Until that happens it writes to Firebase
+exactly as before, and the `bridgeToHive` Cloud Function copies everything
+across every two minutes, so no reading is lost either way.
+
+### Moving the Pi over (if it hasn't done so on its own)
+
+On the Pi, as user `pi`:
+
+```bash
+~/pool-heater-monitor/deploy/deploy.sh --force   # pulls main, copies pi-files/ to ~/Desktop, restarts the monitor
+journalctl -u pool-monitor.service -n 30 --no-pager | grep -i hive
+#   expect: "Picked up the Hive device key" then "Writing to Hive (Supabase)."
+ls -l ~/Desktop/hive-device-key                     # expect: -rw------- pi pi
+```
+
+If the log says "Writing to Firebase (no Hive device key yet)", the key was
+already collected once and the file is missing: ask for a fresh device key
+(a new row in `pool.devices`), then
+`install -m 600 /dev/stdin ~/Desktop/hive-device-key` and paste it, Ctrl-D, and
+`sudo systemctl restart pool-monitor.service`.
+
+Once the dashboard shows fresh readings with the Pi on Hive, the Firebase
+service-account key on the Desktop is only used for the one-time hand-off and
+can be deleted.
 
 ## One-time setup on the Pi
 
@@ -102,8 +138,8 @@ Force an immediate run: `sudo systemctl start pi-deploy.service`.
 
 The Pi writes a reading row every cycle even when no sensor reported, so a
 heartbeat and fresh weather do **not** mean the sensors are working. Start with
-`/water-heater-user/diagnostics` in the Realtime Database — the Pi overwrites it
-every cycle:
+the `diagnostics` row in Hive's `pool.state` table (it was
+`/water-heater-user/diagnostics` in Firebase) — the Pi overwrites it every cycle:
 
 | Field | Meaning |
 | --- | --- |

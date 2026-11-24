@@ -57,7 +57,7 @@ fi
 echo "Syncing pi-files/ -> $DEST"
 # --exclude keeps the Firebase key on the Pi untouched; no --delete so other
 # files already on the Desktop (including that key) are left in place.
-rsync -av --exclude='*firebase-adminsdk*.json' "$REPO_DIR/pi-files/" "$DEST/"
+rsync -av --exclude='*firebase-adminsdk*.json' --exclude='hive-device-key' "$REPO_DIR/pi-files/" "$DEST/"
 
 # The USB recovery helper runs as root, so the copy that matters is the
 # root-owned one in /usr/local/sbin — which this unprivileged deploy cannot
