@@ -203,7 +203,7 @@ const Logs = ({ logs }) => {
                 </InputAdornment>
               ),
               sx: {
-                fontSize: '14px',
+                fontSize: '16px', // under 16px, iOS zooms the page in when the field is focused
                 '& .MuiOutlinedInput-notchedOutline': {
                   borderColor: 'rgba(0, 0, 0, 0.12)'
                 }

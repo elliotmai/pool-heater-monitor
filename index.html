@@ -14,6 +14,13 @@
   <link rel="manifest" href="/manifest.json" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
   <title>House Weather Monitor</title>
+  <script>
+    // Inside Hive's frame: no pinch or double-tap zoom (Hive can't stop a pinch that starts in here).
+    if (window.parent !== window) {
+      document.documentElement.style.touchAction = 'pan-x pan-y';
+      document.addEventListener('gesturestart', function (e) { e.preventDefault(); }, { passive: false });
+    }
+  </script>
 </head>
 
 <body>
